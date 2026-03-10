@@ -1,0 +1,2 @@
+# Parhuzamos_eszkozok_HLFA5R_Baba_Levente
+Repository a Párhuzamos eszközök programozása tantárgyhoz
