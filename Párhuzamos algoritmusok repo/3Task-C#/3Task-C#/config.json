@@ -1,0 +1,8 @@
+{
+  "Mode": "encrypt",
+  "InputFile": "TestFiles\\demo.mp4",
+  "OutputFile": "TestFiles\\demo.AesLike",
+  "Password": "TitkosJelszo",
+  "Strategy": "TaskBased",
+  "Threads": 12
+}

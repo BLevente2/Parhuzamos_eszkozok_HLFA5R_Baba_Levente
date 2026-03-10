@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Platforms>x86</Platforms>
+    <PlatformTarget Condition="'$(PlatformTarget)' == ''">x86</PlatformTarget>
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == '' and '$(PlatformTarget)' == 'x86'">win-x86</RuntimeIdentifier>
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == '' and '$(PlatformTarget)' == 'x64'">win-x64</RuntimeIdentifier>
+    <NativeProjectsRoot>$(MSBuildProjectDirectory)\..\..</NativeProjectsRoot>
+    <OpenClProjectDir>$(NativeProjectsRoot)\crypto_aes_opencl</OpenClProjectDir>
+    <AesLibProjectDir>$(NativeProjectsRoot)\aeslib</AesLibProjectDir>
+    <NativeMakeCommand Condition="'$(NativeMakeCommand)' == ''">make</NativeMakeCommand>
+  </PropertyGroup>
+
+  <Target Name="BuildNativeDependencies" BeforeTargets="Build" Condition="$([MSBuild]::IsOSPlatform('Windows'))">
+    <Message Text="Building native AES dependencies..." Importance="high" />
+    <Exec WorkingDirectory="$(OpenClProjectDir)" Command="$(NativeMakeCommand) shared" ContinueOnError="false" />
+  </Target>
+
+  <Target Name="CopyNativeDependencies" AfterTargets="Build" Condition="$([MSBuild]::IsOSPlatform('Windows'))">
+    <ItemGroup>
+      <NativeRuntimeFiles Include="$(OpenClProjectDir)\build\bin\*.*" />
+      <NativeRuntimeFiles Include="$(AesLibProjectDir)\build\bin\*.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(NativeRuntimeFiles)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" Condition="@(NativeRuntimeFiles) != ''" />
+    <ItemGroup>
+      <KernelFiles Include="$(OpenClProjectDir)\build\bin\kernels\*.*" />
+    </ItemGroup>
+    <MakeDir Directories="$(TargetDir)kernels" />
+    <Copy SourceFiles="@(KernelFiles)" DestinationFolder="$(TargetDir)kernels" SkipUnchangedFiles="true" Condition="@(KernelFiles) != ''" />
+  </Target>
+</Project>
