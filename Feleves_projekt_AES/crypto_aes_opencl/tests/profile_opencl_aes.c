@@ -119,19 +119,28 @@ static void print_opencl_hints_ctr(const crypto_ocl_profile_stats_t* stats)
 static void print_opencl_hints_gcm(const crypto_ocl_profile_stats_t* stats, const crypto_profile_stats_t* cpu_stats, int decrypt_mode)
 {
     uint64_t total = decrypt_mode ? stats->gcm_decrypt_ns : stats->gcm_encrypt_ns;
+    uint64_t transfers = stats->ctr_host_to_device_ns + stats->ctr_device_to_host_ns +
+                         stats->ghash_host_to_device_ns + stats->ghash_device_to_host_ns +
+                         stats->ghash_reduce_device_to_host_ns;
+    uint64_t kernels = stats->ctr_kernel_device_ns + stats->ghash_kernel_device_ns + stats->ghash_reduce_kernel_device_ns;
     printf("Likely bottlenecks:\n");
     if (stats->gcm_ghash_stage_ns > stats->gcm_ctr_stage_ns) {
-        printf("  GHASH is the dominant stage. Optimizing the GHASH kernel or the CPU reduction after it should help the most.\n");
+        printf("  GHASH is still the dominant stage. The next wins are inside the GHASH kernels or by reducing GHASH-side copies further.\n");
     }
-    if (stats->ghash_cpu_reduce_ns * 100 >= total * 10) {
-        printf("  The CPU-side GHASH reduction is measurable after the GPU kernel. Reducing chunk count or improving the reduction path may help.\n");
+    if (stats->ghash_device_copy_ns * 100 >= total * 8) {
+        printf("  Device-to-device GHASH assembly is now visible. A fused GHASH path that reads ciphertext directly could help further.\n");
     }
-    if (stats->ctr_host_to_device_ns + stats->ctr_device_to_host_ns + stats->ghash_host_to_device_ns + stats->ghash_device_to_host_ns >
-        stats->ctr_kernel_device_ns + stats->ghash_kernel_device_ns) {
-        printf("  Data transfers are heavier than combined kernel execution. The GPU path is currently transfer-bound.\n");
+    if (transfers > kernels) {
+        printf("  Data transfers are still heavier than combined kernel execution. The GPU path remains at least partly transfer-bound.\n");
+    }
+    if (stats->ghash_reduce_kernel_device_ns * 100 >= total * 8) {
+        printf("  The on-device GHASH reduction is now measurable. Larger GHASH chunks may reduce this combine cost further.\n");
+    }
+    if (stats->ghash_cpu_reduce_ns == 0 && (stats->ghash_reduce_kernel_device_ns || stats->ghash_device_copy_ns)) {
+        printf("  The old CPU-side GHASH reduction is no longer a hotspot in this build. Most remaining GHASH work is now on the device side.\n");
     }
     if (cpu_stats->gf128_mul_ns || cpu_stats->gf128_pow_ns) {
-        printf("  CPU helper work is still present in the hybrid path. The CPU reduction side is worth profiling next.\n");
+        printf("  CPU helper work is now minor. The best remaining optimizations are in OpenCL data flow and GHASH kernel structure.\n");
     }
 }
 
@@ -350,7 +359,7 @@ static int run_warm_gcm_profile(const uint8_t* key,
 
     {
         uint64_t total = decrypt_mode ? ocl_stats.gcm_decrypt_ns : ocl_stats.gcm_encrypt_ns;
-        metric_item_t items[8];
+        metric_item_t items[11];
         items[0].name = "CTR H2D copy";
         items[0].ns = ocl_stats.ctr_host_to_device_ns;
         items[1].name = "CTR device kernel";
@@ -359,15 +368,21 @@ static int run_warm_gcm_profile(const uint8_t* key,
         items[2].ns = ocl_stats.ctr_device_to_host_ns;
         items[3].name = "GHASH H2D copy";
         items[3].ns = ocl_stats.ghash_host_to_device_ns;
-        items[4].name = "GHASH device kernel";
-        items[4].ns = ocl_stats.ghash_kernel_device_ns;
-        items[5].name = "GHASH D2H copy";
-        items[5].ns = ocl_stats.ghash_device_to_host_ns;
-        items[6].name = "GHASH CPU reduce";
-        items[6].ns = ocl_stats.ghash_cpu_reduce_ns;
-        items[7].name = "Round-key upload";
-        items[7].ns = ocl_stats.round_key_upload_ns;
-        print_ranked_breakdown("Nested OpenCL stages:", total, items, 8);
+        items[4].name = "GHASH device copy";
+        items[4].ns = ocl_stats.ghash_device_copy_ns;
+        items[5].name = "GHASH chunk kernel";
+        items[5].ns = ocl_stats.ghash_kernel_device_ns;
+        items[6].name = "GHASH reduce kernel";
+        items[6].ns = ocl_stats.ghash_reduce_kernel_device_ns;
+        items[7].name = "GHASH chunk D2H";
+        items[7].ns = ocl_stats.ghash_device_to_host_ns;
+        items[8].name = "GHASH final D2H";
+        items[8].ns = ocl_stats.ghash_reduce_device_to_host_ns;
+        items[9].name = "GHASH CPU reduce";
+        items[9].ns = ocl_stats.ghash_cpu_reduce_ns;
+        items[10].name = "Round-key upload";
+        items[10].ns = ocl_stats.round_key_upload_ns;
+        print_ranked_breakdown("Nested OpenCL stages:", total, items, 11);
     }
 
     print_cpu_helper_hotspots(&cpu_stats, decrypt_mode ? ocl_stats.gcm_decrypt_ns : ocl_stats.gcm_encrypt_ns);

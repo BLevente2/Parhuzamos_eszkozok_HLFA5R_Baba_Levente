@@ -34,8 +34,10 @@ typedef struct crypto_ocl_ctx_t {
 
     cl_program ghash_program;
     cl_kernel ghash_kernel;
+    cl_kernel ghash_reduce_kernel;
     cl_mem ghash_blocks_buf;
     cl_mem ghash_chunks_buf;
+    cl_mem ghash_final_buf;
     size_t ghash_blocks_capacity;
     size_t ghash_chunks_capacity;
 
@@ -52,6 +54,17 @@ static crypto_status_t ocl_init_if_needed(void);
 static crypto_status_t ocl_ensure_io_buffers(size_t len);
 static crypto_status_t ocl_upload_round_keys_if_needed(const uint8_t* round_keys, size_t round_keys_len);
 static size_t choose_local_size(size_t max_wg);
+static crypto_status_t ocl_write_buffer(cl_mem buffer, size_t offset, const void* src, size_t len);
+static crypto_status_t ocl_read_buffer(cl_mem buffer, size_t offset, void* dst, size_t len);
+static crypto_status_t ocl_copy_buffer(cl_mem src_buf, size_t src_offset, cl_mem dst_buf, size_t dst_offset, size_t len);
+static crypto_status_t ocl_launch_ctr_kernel(cl_kernel kernel_obj,
+                                            size_t round_keys_len,
+                                            uint64_t iv_hi,
+                                            uint64_t iv_lo,
+                                            size_t len,
+                                            uint64_t block_offset,
+                                            uint64_t* out_kernel_ns,
+                                            int profile_ctr);
 
 static void secure_zero(void* p, size_t n)
 {
@@ -188,25 +201,28 @@ static crypto_status_t crypto_ocl_aes_gcm_ctr_xor_round_keys(const uint8_t* roun
                                                             uint8_t* output,
                                                             size_t len,
                                                             uint64_t block_offset,
+                                                            int upload_input,
+                                                            int download_output,
                                                             uint64_t* out_kernel_ns)
 {
     crypto_status_t st;
-    cl_int e;
     uint64_t iv_hi;
     uint64_t iv_lo;
-    cl_ulong total_len;
-    cl_ulong cl_iv_hi;
-    cl_ulong cl_iv_lo;
-    cl_ulong cl_block_off;
-    size_t global;
-    size_t local;
-    cl_event evt = NULL;
+    uint64_t t_stage;
 
     if (out_kernel_ns) {
         *out_kernel_ns = 0;
     }
 
-    if (!round_keys || !j0 || !input || !output) {
+    if (!round_keys || !j0) {
+        ocl_set_error("Invalid argument");
+        return CRYPTO_INVALID_ARG;
+    }
+    if (upload_input && !input) {
+        ocl_set_error("Invalid argument");
+        return CRYPTO_INVALID_ARG;
+    }
+    if (download_output && !output) {
         ocl_set_error("Invalid argument");
         return CRYPTO_INVALID_ARG;
     }
@@ -233,105 +249,39 @@ static crypto_status_t crypto_ocl_aes_gcm_ctr_xor_round_keys(const uint8_t* roun
     iv_hi = be64_load(j0);
     iv_lo = be64_load(j0 + 8);
 
-    e = clEnqueueWriteBuffer(g_ctx.queue, g_ctx.in_buf, CL_TRUE, 0, len, input, 0, NULL, NULL);
-    if (e != CL_SUCCESS) {
-        format_cl_error(g_ctx.last_error, sizeof(g_ctx.last_error), "clEnqueueWriteBuffer(input) failed", e);
-        return CRYPTO_INTERNAL_ERROR;
-    }
-
-    total_len = (cl_ulong)len;
-    cl_iv_hi = (cl_ulong)iv_hi;
-    cl_iv_lo = (cl_ulong)iv_lo;
-    cl_block_off = (cl_ulong)block_offset;
-
-    cl_uint cl_rounds = (cl_uint)((round_keys_len / 16u) - 1u);
-
-    e = clSetKernelArg(g_ctx.kernel_gcm_ctr, 0, sizeof(cl_mem), &g_ctx.in_buf);
-    if (e != CL_SUCCESS) {
-        format_cl_error(g_ctx.last_error, sizeof(g_ctx.last_error), "clSetKernelArg(0) failed", e);
-        return CRYPTO_INTERNAL_ERROR;
-    }
-    e = clSetKernelArg(g_ctx.kernel_gcm_ctr, 1, sizeof(cl_mem), &g_ctx.out_buf);
-    if (e != CL_SUCCESS) {
-        format_cl_error(g_ctx.last_error, sizeof(g_ctx.last_error), "clSetKernelArg(1) failed", e);
-        return CRYPTO_INTERNAL_ERROR;
-    }
-    e = clSetKernelArg(g_ctx.kernel_gcm_ctr, 2, sizeof(cl_ulong), &total_len);
-    if (e != CL_SUCCESS) {
-        format_cl_error(g_ctx.last_error, sizeof(g_ctx.last_error), "clSetKernelArg(2) failed", e);
-        return CRYPTO_INTERNAL_ERROR;
-    }
-    e = clSetKernelArg(g_ctx.kernel_gcm_ctr, 3, sizeof(cl_mem), &g_ctx.round_keys_buf);
-    if (e != CL_SUCCESS) {
-        format_cl_error(g_ctx.last_error, sizeof(g_ctx.last_error), "clSetKernelArg(3) failed", e);
-        return CRYPTO_INTERNAL_ERROR;
-    }
-    e = clSetKernelArg(g_ctx.kernel_gcm_ctr, 4, sizeof(cl_uint), &cl_rounds);
-    if (e != CL_SUCCESS) {
-        format_cl_error(g_ctx.last_error, sizeof(g_ctx.last_error), "clSetKernelArg(4) failed", e);
-        return CRYPTO_INTERNAL_ERROR;
-    }
-    e = clSetKernelArg(g_ctx.kernel_gcm_ctr, 5, sizeof(cl_ulong), &cl_iv_hi);
-    if (e != CL_SUCCESS) {
-        format_cl_error(g_ctx.last_error, sizeof(g_ctx.last_error), "clSetKernelArg(5) failed", e);
-        return CRYPTO_INTERNAL_ERROR;
-    }
-    e = clSetKernelArg(g_ctx.kernel_gcm_ctr, 6, sizeof(cl_ulong), &cl_iv_lo);
-    if (e != CL_SUCCESS) {
-        format_cl_error(g_ctx.last_error, sizeof(g_ctx.last_error), "clSetKernelArg(6) failed", e);
-        return CRYPTO_INTERNAL_ERROR;
-    }
-    e = clSetKernelArg(g_ctx.kernel_gcm_ctr, 7, sizeof(cl_ulong), &cl_block_off);
-    if (e != CL_SUCCESS) {
-        format_cl_error(g_ctx.last_error, sizeof(g_ctx.last_error), "clSetKernelArg(7) failed", e);
-        return CRYPTO_INTERNAL_ERROR;
-    }
-
-    global = (len + 15) / 16;
-    global = (global + 3) / 4;
-
-    local = choose_local_size(g_ctx.max_wg);
-    if (local > global) {
-        local = 1;
-    }
-    if (global % local != 0) {
-        global = ((global + local - 1) / local) * local;
-    }
-
+    if (upload_input) {
+        t_stage = crypto_time_now_ns();
+        st = ocl_write_buffer(g_ctx.in_buf, 0, input, len);
 #ifdef CRYPTO_OCL_PROFILE
-    e = clEnqueueNDRangeKernel(g_ctx.queue, g_ctx.kernel_gcm_ctr, 1, NULL, &global, &local, 0, NULL, &evt);
-#else
-    e = clEnqueueNDRangeKernel(g_ctx.queue, g_ctx.kernel_gcm_ctr, 1, NULL, &global, &local, 0, NULL, NULL);
+        crypto_ocl_profile_add_ctr_host_to_device(crypto_time_now_ns() - t_stage);
 #endif
-    if (e != CL_SUCCESS) {
-        format_cl_error(g_ctx.last_error, sizeof(g_ctx.last_error), "clEnqueueNDRangeKernel failed", e);
-        if (evt) {
-            clReleaseEvent(evt);
-        }
-        return CRYPTO_INTERNAL_ERROR;
-    }
-
-    e = clEnqueueReadBuffer(g_ctx.queue, g_ctx.out_buf, CL_TRUE, 0, len, output, 0, NULL, NULL);
-    if (e != CL_SUCCESS) {
-        format_cl_error(g_ctx.last_error, sizeof(g_ctx.last_error), "clEnqueueReadBuffer(output) failed", e);
-        return CRYPTO_INTERNAL_ERROR;
-    }
-
-#ifdef CRYPTO_OCL_PROFILE
-    if (evt && out_kernel_ns) {
-        cl_ulong t0 = 0;
-        cl_ulong t1 = 0;
-        if (clGetEventProfilingInfo(evt, CL_PROFILING_COMMAND_START, sizeof(cl_ulong), &t0, NULL) == CL_SUCCESS &&
-            clGetEventProfilingInfo(evt, CL_PROFILING_COMMAND_END, sizeof(cl_ulong), &t1, NULL) == CL_SUCCESS &&
-            t1 >= t0) {
-            *out_kernel_ns = (uint64_t)(t1 - t0);
+        if (st != CRYPTO_OK) {
+            return st;
         }
     }
-    if (evt) {
-        clReleaseEvent(evt);
-        evt = NULL;
+
+    st = ocl_launch_ctr_kernel(g_ctx.kernel_gcm_ctr,
+                               round_keys_len,
+                               iv_hi,
+                               iv_lo,
+                               len,
+                               block_offset,
+                               out_kernel_ns,
+                               1);
+    if (st != CRYPTO_OK) {
+        return st;
     }
+
+    if (download_output) {
+        t_stage = crypto_time_now_ns();
+        st = ocl_read_buffer(g_ctx.out_buf, 0, output, len);
+#ifdef CRYPTO_OCL_PROFILE
+        crypto_ocl_profile_add_ctr_device_to_host(crypto_time_now_ns() - t_stage);
 #endif
+        if (st != CRYPTO_OK) {
+            return st;
+        }
+    }
 
     return CRYPTO_OK;
 }
@@ -576,6 +526,39 @@ static crypto_status_t ocl_init_if_needed(void)
         if (build_log2) {
             kl_free(build_log2);
         }
+
+        {
+            cl_int e3 = CL_SUCCESS;
+            g_ctx.ghash_reduce_kernel = clCreateKernel(g_ctx.ghash_program, "gcm_ghash_reduce", &e3);
+            if (!g_ctx.ghash_reduce_kernel || e3 != CL_SUCCESS) {
+                format_cl_error(g_ctx.last_error, sizeof(g_ctx.last_error), "clCreateKernel(gcm_ghash_reduce) failed", e3);
+                if (g_ctx.ghash_reduce_kernel) {
+                    clReleaseKernel(g_ctx.ghash_reduce_kernel);
+                    g_ctx.ghash_reduce_kernel = NULL;
+                }
+                if (g_ctx.ghash_kernel) {
+                    clReleaseKernel(g_ctx.ghash_kernel);
+                    g_ctx.ghash_kernel = NULL;
+                }
+                if (g_ctx.ghash_program) {
+                    clReleaseProgram(g_ctx.ghash_program);
+                    g_ctx.ghash_program = NULL;
+                }
+                clReleaseKernel(g_ctx.kernel_gcm_ctr);
+                g_ctx.kernel_gcm_ctr = NULL;
+                clReleaseKernel(g_ctx.kernel);
+                g_ctx.kernel = NULL;
+                clReleaseProgram(g_ctx.program);
+                g_ctx.program = NULL;
+                clReleaseMemObject(g_ctx.round_keys_buf);
+                g_ctx.round_keys_buf = NULL;
+                clReleaseCommandQueue(g_ctx.queue);
+                clReleaseContext(g_ctx.context);
+                g_ctx.queue = NULL;
+                g_ctx.context = NULL;
+                return CRYPTO_INTERNAL_ERROR;
+            }
+        }
     }
 
     g_ctx.inited = 1;
@@ -625,9 +608,17 @@ void crypto_ocl_shutdown(void)
         clReleaseMemObject(g_ctx.ghash_chunks_buf);
         g_ctx.ghash_chunks_buf = NULL;
     }
+    if (g_ctx.ghash_final_buf) {
+        clReleaseMemObject(g_ctx.ghash_final_buf);
+        g_ctx.ghash_final_buf = NULL;
+    }
     g_ctx.ghash_blocks_capacity = 0;
     g_ctx.ghash_chunks_capacity = 0;
 
+    if (g_ctx.ghash_reduce_kernel) {
+        clReleaseKernel(g_ctx.ghash_reduce_kernel);
+        g_ctx.ghash_reduce_kernel = NULL;
+    }
     if (g_ctx.ghash_kernel) {
         clReleaseKernel(g_ctx.ghash_kernel);
         g_ctx.ghash_kernel = NULL;
@@ -716,6 +707,10 @@ static void ocl_release_ghash_buffers(void)
         clReleaseMemObject(g_ctx.ghash_chunks_buf);
         g_ctx.ghash_chunks_buf = NULL;
     }
+    if (g_ctx.ghash_final_buf) {
+        clReleaseMemObject(g_ctx.ghash_final_buf);
+        g_ctx.ghash_final_buf = NULL;
+    }
     g_ctx.ghash_blocks_capacity = 0;
     g_ctx.ghash_chunks_capacity = 0;
 }
@@ -733,7 +728,8 @@ static crypto_status_t ocl_ensure_ghash_buffers(size_t blocks_bytes, size_t chun
     if (g_ctx.ghash_blocks_capacity >= blocks_bytes &&
         g_ctx.ghash_chunks_capacity >= chunk_count &&
         g_ctx.ghash_blocks_buf &&
-        g_ctx.ghash_chunks_buf) {
+        g_ctx.ghash_chunks_buf &&
+        g_ctx.ghash_final_buf) {
 #ifdef CRYPTO_OCL_PROFILE
         crypto_ocl_profile_add_ensure_ghash(crypto_time_now_ns() - t0, 0, blocks_bytes, chunk_count);
 #endif
@@ -750,9 +746,16 @@ static crypto_status_t ocl_ensure_ghash_buffers(size_t blocks_bytes, size_t chun
         return CRYPTO_INTERNAL_ERROR;
     }
 
-    g_ctx.ghash_chunks_buf = clCreateBuffer(g_ctx.context, CL_MEM_WRITE_ONLY, chunk_count * 2u * sizeof(uint64_t), NULL, &e);
+    g_ctx.ghash_chunks_buf = clCreateBuffer(g_ctx.context, CL_MEM_READ_WRITE, chunk_count * 2u * sizeof(uint64_t), NULL, &e);
     if (!g_ctx.ghash_chunks_buf || e != CL_SUCCESS) {
         format_cl_error(g_ctx.last_error, sizeof(g_ctx.last_error), "clCreateBuffer(ghash_chunks) failed", e);
+        ocl_release_ghash_buffers();
+        return CRYPTO_INTERNAL_ERROR;
+    }
+
+    g_ctx.ghash_final_buf = clCreateBuffer(g_ctx.context, CL_MEM_WRITE_ONLY, 2u * sizeof(uint64_t), NULL, &e);
+    if (!g_ctx.ghash_final_buf || e != CL_SUCCESS) {
+        format_cl_error(g_ctx.last_error, sizeof(g_ctx.last_error), "clCreateBuffer(ghash_final) failed", e);
         ocl_release_ghash_buffers();
         return CRYPTO_INTERNAL_ERROR;
     }
@@ -788,6 +791,183 @@ static size_t choose_local_size(size_t max_wg)
         return 32;
     }
     return 1;
+}
+
+static crypto_status_t ocl_write_buffer(cl_mem buffer, size_t offset, const void* src, size_t len)
+{
+    cl_int e;
+
+    if (len == 0) {
+        return CRYPTO_OK;
+    }
+    if (!buffer || !src) {
+        ocl_set_error("Invalid argument");
+        return CRYPTO_INVALID_ARG;
+    }
+
+    e = clEnqueueWriteBuffer(g_ctx.queue, buffer, CL_TRUE, offset, len, src, 0, NULL, NULL);
+    if (e != CL_SUCCESS) {
+        format_cl_error(g_ctx.last_error, sizeof(g_ctx.last_error), "clEnqueueWriteBuffer failed", e);
+        return CRYPTO_INTERNAL_ERROR;
+    }
+    return CRYPTO_OK;
+}
+
+static crypto_status_t ocl_read_buffer(cl_mem buffer, size_t offset, void* dst, size_t len)
+{
+    cl_int e;
+
+    if (len == 0) {
+        return CRYPTO_OK;
+    }
+    if (!buffer || !dst) {
+        ocl_set_error("Invalid argument");
+        return CRYPTO_INVALID_ARG;
+    }
+
+    e = clEnqueueReadBuffer(g_ctx.queue, buffer, CL_TRUE, offset, len, dst, 0, NULL, NULL);
+    if (e != CL_SUCCESS) {
+        format_cl_error(g_ctx.last_error, sizeof(g_ctx.last_error), "clEnqueueReadBuffer failed", e);
+        return CRYPTO_INTERNAL_ERROR;
+    }
+    return CRYPTO_OK;
+}
+
+static crypto_status_t ocl_copy_buffer(cl_mem src_buf, size_t src_offset, cl_mem dst_buf, size_t dst_offset, size_t len)
+{
+    cl_int e;
+
+    if (len == 0) {
+        return CRYPTO_OK;
+    }
+    if (!src_buf || !dst_buf) {
+        ocl_set_error("Invalid argument");
+        return CRYPTO_INVALID_ARG;
+    }
+
+    e = clEnqueueCopyBuffer(g_ctx.queue, src_buf, dst_buf, src_offset, dst_offset, len, 0, NULL, NULL);
+    if (e != CL_SUCCESS) {
+        format_cl_error(g_ctx.last_error, sizeof(g_ctx.last_error), "clEnqueueCopyBuffer failed", e);
+        return CRYPTO_INTERNAL_ERROR;
+    }
+    return CRYPTO_OK;
+}
+
+static crypto_status_t ocl_launch_ctr_kernel(cl_kernel kernel_obj,
+                                            size_t round_keys_len,
+                                            uint64_t iv_hi,
+                                            uint64_t iv_lo,
+                                            size_t len,
+                                            uint64_t block_offset,
+                                            uint64_t* out_kernel_ns,
+                                            int profile_ctr)
+{
+    cl_int e;
+    cl_ulong total_len = (cl_ulong)len;
+    cl_ulong cl_iv_hi = (cl_ulong)iv_hi;
+    cl_ulong cl_iv_lo = (cl_ulong)iv_lo;
+    cl_ulong cl_block_off = (cl_ulong)block_offset;
+    cl_uint cl_rounds = (cl_uint)((round_keys_len / 16u) - 1u);
+    size_t global;
+    size_t local;
+    cl_event evt = NULL;
+    uint64_t t_stage;
+    uint64_t device_kernel_ns = 0;
+
+    if (out_kernel_ns) {
+        *out_kernel_ns = 0;
+    }
+    if (!kernel_obj) {
+        ocl_set_error("CTR kernel is not initialized");
+        return CRYPTO_INTERNAL_ERROR;
+    }
+
+    t_stage = crypto_time_now_ns();
+    e = clSetKernelArg(kernel_obj, 0, sizeof(cl_mem), &g_ctx.in_buf);
+    if (e == CL_SUCCESS) {
+        e = clSetKernelArg(kernel_obj, 1, sizeof(cl_mem), &g_ctx.out_buf);
+    }
+    if (e == CL_SUCCESS) {
+        e = clSetKernelArg(kernel_obj, 2, sizeof(cl_ulong), &total_len);
+    }
+    if (e == CL_SUCCESS) {
+        e = clSetKernelArg(kernel_obj, 3, sizeof(cl_mem), &g_ctx.round_keys_buf);
+    }
+    if (e == CL_SUCCESS) {
+        e = clSetKernelArg(kernel_obj, 4, sizeof(cl_uint), &cl_rounds);
+    }
+    if (e == CL_SUCCESS) {
+        e = clSetKernelArg(kernel_obj, 5, sizeof(cl_ulong), &cl_iv_hi);
+    }
+    if (e == CL_SUCCESS) {
+        e = clSetKernelArg(kernel_obj, 6, sizeof(cl_ulong), &cl_iv_lo);
+    }
+    if (e == CL_SUCCESS) {
+        e = clSetKernelArg(kernel_obj, 7, sizeof(cl_ulong), &cl_block_off);
+    }
+#ifdef CRYPTO_OCL_PROFILE
+    if (profile_ctr) {
+        crypto_ocl_profile_add_ctr_set_args(crypto_time_now_ns() - t_stage);
+    }
+#endif
+    if (e != CL_SUCCESS) {
+        format_cl_error(g_ctx.last_error, sizeof(g_ctx.last_error), "clSetKernelArg failed", e);
+        return CRYPTO_INTERNAL_ERROR;
+    }
+
+    {
+        size_t blocks = (len + 15) / 16;
+        global = (blocks + 3) / 4;
+    }
+    local = choose_local_size(g_ctx.max_wg);
+    if (local > global && global > 0) {
+        local = global;
+    }
+    if (local == 0) {
+        local = 1;
+    }
+    if (global % local != 0) {
+        global = ((global + local - 1) / local) * local;
+    }
+
+    t_stage = crypto_time_now_ns();
+#ifdef CRYPTO_OCL_PROFILE
+    e = clEnqueueNDRangeKernel(g_ctx.queue, kernel_obj, 1, NULL, &global, &local, 0, NULL, &evt);
+    if (profile_ctr) {
+        crypto_ocl_profile_add_ctr_kernel_enqueue(crypto_time_now_ns() - t_stage, 0);
+    }
+#else
+    e = clEnqueueNDRangeKernel(g_ctx.queue, kernel_obj, 1, NULL, &global, &local, 0, NULL, NULL);
+#endif
+    if (e != CL_SUCCESS) {
+        format_cl_error(g_ctx.last_error, sizeof(g_ctx.last_error), "clEnqueueNDRangeKernel failed", e);
+        if (evt) {
+            clReleaseEvent(evt);
+        }
+        return CRYPTO_INTERNAL_ERROR;
+    }
+
+#ifdef CRYPTO_OCL_PROFILE
+    if (evt) {
+        cl_ulong te0 = 0;
+        cl_ulong te1 = 0;
+        if (clGetEventProfilingInfo(evt, CL_PROFILING_COMMAND_START, sizeof(cl_ulong), &te0, NULL) == CL_SUCCESS &&
+            clGetEventProfilingInfo(evt, CL_PROFILING_COMMAND_END, sizeof(cl_ulong), &te1, NULL) == CL_SUCCESS &&
+            te1 >= te0) {
+            device_kernel_ns = (uint64_t)(te1 - te0);
+        }
+        if (profile_ctr) {
+            crypto_ocl_profile_add_ctr_kernel_enqueue(0, device_kernel_ns);
+        }
+        clReleaseEvent(evt);
+        evt = NULL;
+    }
+#endif
+
+    if (out_kernel_ns) {
+        *out_kernel_ns = device_kernel_ns;
+    }
+    return CRYPTO_OK;
 }
 
 static crypto_status_t ocl_upload_round_keys_if_needed(const uint8_t* round_keys, size_t round_keys_len)
@@ -1117,21 +1297,33 @@ static void gcm_compute_j0_cpu(const uint8_t h[16], const uint8_t* iv, size_t iv
     ghash_lengths_cpu(h, j0, 0, (uint64_t)iv_len);
 }
 
-static size_t gcm_choose_chunk_blocks(void)
+static size_t gcm_choose_chunk_blocks(size_t num_blocks)
 {
     const char* env = getenv("CRYPTO_OCL_GHASH_CHUNK_BLOCKS");
-    size_t v = 256;
+    size_t v;
+
     if (env && env[0]) {
         unsigned long long tmp = strtoull(env, NULL, 10);
         if (tmp > 0) {
             v = (size_t)tmp;
+        } else {
+            v = 1024;
         }
-    }
-    if (v == 0) {
+    } else if (num_blocks >= 262144u) {
+        v = 2048;
+    } else if (num_blocks >= 16384u) {
+        v = 1024;
+    } else if (num_blocks >= 2048u) {
+        v = 512;
+    } else {
         v = 256;
     }
-    if (v > 4096) {
-        v = 4096;
+
+    if (v < 64) {
+        v = 64;
+    }
+    if (v > 16384) {
+        v = 16384;
     }
     return v;
 }
@@ -1139,8 +1331,9 @@ static size_t gcm_choose_chunk_blocks(void)
 static crypto_status_t gcm_ghash_opencl(const uint8_t h[16],
                                        const uint8_t* aad,
                                        size_t aad_len,
-                                       const uint8_t* ct,
+                                       const uint8_t* ct_host,
                                        size_t ct_len,
+                                       cl_mem ct_device_buf,
                                        uint8_t y_out[16],
                                        uint64_t* out_kernel_ns)
 {
@@ -1150,27 +1343,52 @@ static crypto_status_t gcm_ghash_opencl(const uint8_t h[16],
     size_t num_blocks = aad_blocks + ct_blocks + 1;
     size_t blocks_bytes = num_blocks * 16;
 
-    size_t chunk_blocks = gcm_choose_chunk_blocks();
+    size_t chunk_blocks = gcm_choose_chunk_blocks(num_blocks);
     size_t chunk_count = (num_blocks + chunk_blocks - 1) / chunk_blocks;
+    size_t last_len = num_blocks - (chunk_count - 1) * chunk_blocks;
 
     cl_int e;
     size_t global;
     size_t local;
-    cl_event evt = NULL;
+    cl_event evt_chunk = NULL;
+    cl_event evt_reduce = NULL;
 
     uint64_t cl_num_blocks;
+    uint64_t cl_chunk_count;
     uint32_t cl_chunk_blocks;
     uint64_t h_hi;
     uint64_t h_lo;
-
-    uint64_t* chunk_hashes = NULL;
+    uint64_t final_hash[2];
     uint8_t len_blk[16];
+    uint8_t pow_full[16];
+    uint8_t pow_last[16];
+    uint64_t pow_full_hi;
+    uint64_t pow_full_lo;
+    uint64_t pow_last_hi;
+    uint64_t pow_last_lo;
     uint64_t t_total = crypto_time_now_ns();
     uint64_t t_stage = 0;
-    uint64_t device_kernel_ns = 0;
+    uint64_t device_chunk_ns = 0;
+    uint64_t device_reduce_ns = 0;
 
     if (out_kernel_ns) {
         *out_kernel_ns = 0;
+    }
+    if (!h || !y_out) {
+        ocl_set_error("Invalid argument");
+        return CRYPTO_INVALID_ARG;
+    }
+    if (ct_len && !ct_host && !ct_device_buf) {
+        ocl_set_error("Invalid argument");
+        return CRYPTO_INVALID_ARG;
+    }
+    if (aad_len && !aad) {
+        ocl_set_error("Invalid argument");
+        return CRYPTO_INVALID_ARG;
+    }
+
+    if (last_len == 0) {
+        last_len = chunk_blocks;
     }
 
     st = ocl_init_if_needed();
@@ -1183,32 +1401,32 @@ static crypto_status_t gcm_ghash_opencl(const uint8_t h[16],
         return st;
     }
 
-    t_stage = crypto_time_now_ns();
     if (aad_len) {
         size_t aad_full = (aad_len / 16) * 16;
         size_t aad_rem = aad_len - aad_full;
+
         if (aad_full) {
-            e = clEnqueueWriteBuffer(g_ctx.queue, g_ctx.ghash_blocks_buf, CL_TRUE, 0, aad_full, aad, 0, NULL, NULL);
-            if (e != CL_SUCCESS) {
-                format_cl_error(g_ctx.last_error, sizeof(g_ctx.last_error), "clEnqueueWriteBuffer(ghash_aad_full) failed", e);
+            t_stage = crypto_time_now_ns();
+            st = ocl_write_buffer(g_ctx.ghash_blocks_buf, 0, aad, aad_full);
 #ifdef CRYPTO_OCL_PROFILE
-                crypto_ocl_profile_add_ghash_host_to_device(crypto_time_now_ns() - t_stage);
+            crypto_ocl_profile_add_ghash_host_to_device(crypto_time_now_ns() - t_stage);
 #endif
-                return CRYPTO_INTERNAL_ERROR;
+            if (st != CRYPTO_OK) {
+                return st;
             }
         }
         if (aad_rem) {
             uint8_t tail[16];
             memset(tail, 0, sizeof(tail));
             memcpy(tail, aad + aad_full, aad_rem);
-            e = clEnqueueWriteBuffer(g_ctx.queue, g_ctx.ghash_blocks_buf, CL_TRUE, aad_full, 16, tail, 0, NULL, NULL);
-            secure_zero(tail, sizeof(tail));
-            if (e != CL_SUCCESS) {
-                format_cl_error(g_ctx.last_error, sizeof(g_ctx.last_error), "clEnqueueWriteBuffer(ghash_aad_tail) failed", e);
+            t_stage = crypto_time_now_ns();
+            st = ocl_write_buffer(g_ctx.ghash_blocks_buf, aad_full, tail, 16);
 #ifdef CRYPTO_OCL_PROFILE
-                crypto_ocl_profile_add_ghash_host_to_device(crypto_time_now_ns() - t_stage);
+            crypto_ocl_profile_add_ghash_host_to_device(crypto_time_now_ns() - t_stage);
 #endif
-                return CRYPTO_INTERNAL_ERROR;
+            secure_zero(tail, sizeof(tail));
+            if (st != CRYPTO_OK) {
+                return st;
             }
         }
     }
@@ -1217,47 +1435,75 @@ static crypto_status_t gcm_ghash_opencl(const uint8_t h[16],
         size_t ct_offset = aad_blocks * 16;
         size_t ct_full = (ct_len / 16) * 16;
         size_t ct_rem = ct_len - ct_full;
+
         if (ct_full) {
-            e = clEnqueueWriteBuffer(g_ctx.queue, g_ctx.ghash_blocks_buf, CL_TRUE, ct_offset, ct_full, ct, 0, NULL, NULL);
-            if (e != CL_SUCCESS) {
-                format_cl_error(g_ctx.last_error, sizeof(g_ctx.last_error), "clEnqueueWriteBuffer(ghash_ct_full) failed", e);
+            t_stage = crypto_time_now_ns();
+            if (ct_device_buf) {
+                st = ocl_copy_buffer(ct_device_buf, 0, g_ctx.ghash_blocks_buf, ct_offset, ct_full);
+#ifdef CRYPTO_OCL_PROFILE
+                crypto_ocl_profile_add_ghash_device_copy(crypto_time_now_ns() - t_stage);
+#endif
+            } else {
+                st = ocl_write_buffer(g_ctx.ghash_blocks_buf, ct_offset, ct_host, ct_full);
 #ifdef CRYPTO_OCL_PROFILE
                 crypto_ocl_profile_add_ghash_host_to_device(crypto_time_now_ns() - t_stage);
 #endif
-                return CRYPTO_INTERNAL_ERROR;
+            }
+            if (st != CRYPTO_OK) {
+                return st;
             }
         }
+
         if (ct_rem) {
             uint8_t tail[16];
             memset(tail, 0, sizeof(tail));
-            memcpy(tail, ct + ct_full, ct_rem);
-            e = clEnqueueWriteBuffer(g_ctx.queue, g_ctx.ghash_blocks_buf, CL_TRUE, ct_offset + ct_full, 16, tail, 0, NULL, NULL);
-            secure_zero(tail, sizeof(tail));
-            if (e != CL_SUCCESS) {
-                format_cl_error(g_ctx.last_error, sizeof(g_ctx.last_error), "clEnqueueWriteBuffer(ghash_ct_tail) failed", e);
+            if (ct_host) {
+                memcpy(tail, ct_host + ct_full, ct_rem);
+            } else {
+                st = ocl_read_buffer(ct_device_buf, ct_full, tail, ct_rem);
+                if (st != CRYPTO_OK) {
+                    secure_zero(tail, sizeof(tail));
+                    return st;
+                }
+            }
+
+            t_stage = crypto_time_now_ns();
+            st = ocl_write_buffer(g_ctx.ghash_blocks_buf, ct_offset + ct_full, tail, 16);
 #ifdef CRYPTO_OCL_PROFILE
-                crypto_ocl_profile_add_ghash_host_to_device(crypto_time_now_ns() - t_stage);
+            crypto_ocl_profile_add_ghash_host_to_device(crypto_time_now_ns() - t_stage);
 #endif
-                return CRYPTO_INTERNAL_ERROR;
+            secure_zero(tail, sizeof(tail));
+            if (st != CRYPTO_OK) {
+                return st;
             }
         }
     }
 
     be64_store((uint64_t)aad_len * 8u, len_blk);
     be64_store((uint64_t)ct_len * 8u, len_blk + 8);
-    e = clEnqueueWriteBuffer(g_ctx.queue, g_ctx.ghash_blocks_buf, CL_TRUE, (num_blocks - 1) * 16, 16, len_blk, 0, NULL, NULL);
-    secure_zero(len_blk, sizeof(len_blk));
+    t_stage = crypto_time_now_ns();
+    st = ocl_write_buffer(g_ctx.ghash_blocks_buf, (num_blocks - 1) * 16, len_blk, 16);
 #ifdef CRYPTO_OCL_PROFILE
     crypto_ocl_profile_add_ghash_host_to_device(crypto_time_now_ns() - t_stage);
 #endif
-    if (e != CL_SUCCESS) {
-        format_cl_error(g_ctx.last_error, sizeof(g_ctx.last_error), "clEnqueueWriteBuffer(ghash_lengths) failed", e);
-        return CRYPTO_INTERNAL_ERROR;
+    secure_zero(len_blk, sizeof(len_blk));
+    if (st != CRYPTO_OK) {
+        return st;
     }
+
+    crypto_gf128_pow(h, (uint64_t)chunk_blocks, pow_full);
+    crypto_gf128_pow(h, (uint64_t)last_len, pow_last);
+    pow_full_hi = be64_load(pow_full);
+    pow_full_lo = be64_load(pow_full + 8);
+    pow_last_hi = be64_load(pow_last);
+    pow_last_lo = be64_load(pow_last + 8);
+    secure_zero(pow_full, sizeof(pow_full));
+    secure_zero(pow_last, sizeof(pow_last));
 
     h_hi = (uint64_t)be64_load(h);
     h_lo = (uint64_t)be64_load(h + 8);
     cl_num_blocks = (uint64_t)num_blocks;
+    cl_chunk_count = (uint64_t)chunk_count;
     cl_chunk_blocks = (uint32_t)chunk_blocks;
 
     t_stage = crypto_time_now_ns();
@@ -1287,7 +1533,10 @@ static crypto_status_t gcm_ghash_opencl(const uint8_t h[16],
 
     global = chunk_count;
     local = choose_local_size(g_ctx.max_wg);
-    if (local > global) {
+    if (local > global && global > 0) {
+        local = global;
+    }
+    if (local == 0) {
         local = 1;
     }
     if (global % local != 0) {
@@ -1296,111 +1545,122 @@ static crypto_status_t gcm_ghash_opencl(const uint8_t h[16],
 
     t_stage = crypto_time_now_ns();
 #ifdef CRYPTO_OCL_PROFILE
-    e = clEnqueueNDRangeKernel(g_ctx.queue, g_ctx.ghash_kernel, 1, NULL, &global, &local, 0, NULL, &evt);
+    e = clEnqueueNDRangeKernel(g_ctx.queue, g_ctx.ghash_kernel, 1, NULL, &global, &local, 0, NULL, &evt_chunk);
+    crypto_ocl_profile_add_ghash_kernel_enqueue(crypto_time_now_ns() - t_stage, 0);
 #else
     e = clEnqueueNDRangeKernel(g_ctx.queue, g_ctx.ghash_kernel, 1, NULL, &global, &local, 0, NULL, NULL);
 #endif
-#ifdef CRYPTO_OCL_PROFILE
-    crypto_ocl_profile_add_ghash_kernel_enqueue(crypto_time_now_ns() - t_stage, 0);
-#endif
     if (e != CL_SUCCESS) {
         format_cl_error(g_ctx.last_error, sizeof(g_ctx.last_error), "clEnqueueNDRangeKernel(ghash) failed", e);
-        if (evt) {
-            clReleaseEvent(evt);
-        }
-        return CRYPTO_INTERNAL_ERROR;
-    }
-
-    chunk_hashes = (uint64_t*)malloc(chunk_count * 2u * sizeof(uint64_t));
-    if (!chunk_hashes) {
-        ocl_set_error("Out of memory while allocating GHASH chunk hashes");
-        if (evt) {
-            clReleaseEvent(evt);
+        if (evt_chunk) {
+            clReleaseEvent(evt_chunk);
         }
         return CRYPTO_INTERNAL_ERROR;
     }
 
     t_stage = crypto_time_now_ns();
-    e = clEnqueueReadBuffer(g_ctx.queue, g_ctx.ghash_chunks_buf, CL_TRUE, 0, chunk_count * 2u * sizeof(uint64_t), chunk_hashes, 0, NULL, NULL);
+    e = clSetKernelArg(g_ctx.ghash_reduce_kernel, 0, sizeof(cl_mem), &g_ctx.ghash_chunks_buf);
+    if (e == CL_SUCCESS) {
+        e = clSetKernelArg(g_ctx.ghash_reduce_kernel, 1, sizeof(cl_mem), &g_ctx.ghash_final_buf);
+    }
+    if (e == CL_SUCCESS) {
+        e = clSetKernelArg(g_ctx.ghash_reduce_kernel, 2, sizeof(uint64_t), &cl_chunk_count);
+    }
+    if (e == CL_SUCCESS) {
+        e = clSetKernelArg(g_ctx.ghash_reduce_kernel, 3, sizeof(uint64_t), &pow_full_hi);
+    }
+    if (e == CL_SUCCESS) {
+        e = clSetKernelArg(g_ctx.ghash_reduce_kernel, 4, sizeof(uint64_t), &pow_full_lo);
+    }
+    if (e == CL_SUCCESS) {
+        e = clSetKernelArg(g_ctx.ghash_reduce_kernel, 5, sizeof(uint64_t), &pow_last_hi);
+    }
+    if (e == CL_SUCCESS) {
+        e = clSetKernelArg(g_ctx.ghash_reduce_kernel, 6, sizeof(uint64_t), &pow_last_lo);
+    }
 #ifdef CRYPTO_OCL_PROFILE
-    crypto_ocl_profile_add_ghash_device_to_host(crypto_time_now_ns() - t_stage);
+    crypto_ocl_profile_add_ghash_reduce_set_args(crypto_time_now_ns() - t_stage);
 #endif
     if (e != CL_SUCCESS) {
-        format_cl_error(g_ctx.last_error, sizeof(g_ctx.last_error), "clEnqueueReadBuffer(ghash_chunks) failed", e);
-        free(chunk_hashes);
-        if (evt) {
-            clReleaseEvent(evt);
+        format_cl_error(g_ctx.last_error, sizeof(g_ctx.last_error), "clSetKernelArg(ghash_reduce) failed", e);
+        if (evt_chunk) {
+            clReleaseEvent(evt_chunk);
         }
         return CRYPTO_INTERNAL_ERROR;
     }
 
+    global = 1;
+    local = 1;
+    t_stage = crypto_time_now_ns();
 #ifdef CRYPTO_OCL_PROFILE
-    if (evt) {
-        cl_ulong te0 = 0;
-        cl_ulong te1 = 0;
-        if (clGetEventProfilingInfo(evt, CL_PROFILING_COMMAND_START, sizeof(cl_ulong), &te0, NULL) == CL_SUCCESS &&
-            clGetEventProfilingInfo(evt, CL_PROFILING_COMMAND_END, sizeof(cl_ulong), &te1, NULL) == CL_SUCCESS &&
-            te1 >= te0) {
-            device_kernel_ns = (uint64_t)(te1 - te0);
-        }
-        crypto_ocl_profile_add_ghash_kernel_enqueue(0, device_kernel_ns);
-    }
+    e = clEnqueueNDRangeKernel(g_ctx.queue, g_ctx.ghash_reduce_kernel, 1, NULL, &global, &local, 0, NULL, &evt_reduce);
+    crypto_ocl_profile_add_ghash_reduce_kernel_enqueue(crypto_time_now_ns() - t_stage, 0);
+#else
+    e = clEnqueueNDRangeKernel(g_ctx.queue, g_ctx.ghash_reduce_kernel, 1, NULL, &global, &local, 0, NULL, NULL);
 #endif
-    if (out_kernel_ns) {
-        *out_kernel_ns = device_kernel_ns;
-    }
-    if (evt) {
-        clReleaseEvent(evt);
-        evt = NULL;
+    if (e != CL_SUCCESS) {
+        format_cl_error(g_ctx.last_error, sizeof(g_ctx.last_error), "clEnqueueNDRangeKernel(ghash_reduce) failed", e);
+        if (evt_chunk) {
+            clReleaseEvent(evt_chunk);
+        }
+        if (evt_reduce) {
+            clReleaseEvent(evt_reduce);
+        }
+        return CRYPTO_INTERNAL_ERROR;
     }
 
     t_stage = crypto_time_now_ns();
-    {
-        uint8_t y[16];
-        uint8_t pow_full[16];
-        uint8_t pow_last[16];
-        size_t last_len = num_blocks - (chunk_count - 1) * chunk_blocks;
-        if (last_len == 0) {
-            last_len = chunk_blocks;
-        }
-
-        memset(y, 0, sizeof(y));
-        crypto_gf128_pow(h, (uint64_t)chunk_blocks, pow_full);
-        crypto_gf128_pow(h, (uint64_t)last_len, pow_last);
-
-        for (size_t i = 0; i < chunk_count; i++) {
-            uint8_t chunk_bytes[16];
-            uint8_t tmp[16];
-            uint8_t pow_use[16];
-
-            be64_store((uint64_t)chunk_hashes[i * 2u], chunk_bytes);
-            be64_store((uint64_t)chunk_hashes[i * 2u + 1u], chunk_bytes + 8);
-
-            if (i + 1 == chunk_count) {
-                memcpy(pow_use, pow_last, 16);
-            } else {
-                memcpy(pow_use, pow_full, 16);
-            }
-
-            crypto_gf128_mul(y, pow_use, tmp);
-            crypto_gf128_xor(y, tmp, chunk_bytes);
-
-            secure_zero(chunk_bytes, sizeof(chunk_bytes));
-            secure_zero(tmp, sizeof(tmp));
-            secure_zero(pow_use, sizeof(pow_use));
-        }
-
-        memcpy(y_out, y, 16);
-        secure_zero(y, sizeof(y));
-        secure_zero(pow_full, sizeof(pow_full));
-        secure_zero(pow_last, sizeof(pow_last));
-    }
+    st = ocl_read_buffer(g_ctx.ghash_final_buf, 0, final_hash, sizeof(final_hash));
 #ifdef CRYPTO_OCL_PROFILE
-    crypto_ocl_profile_add_ghash_cpu_reduce(crypto_time_now_ns() - t_stage);
-    crypto_ocl_profile_add_ghash_total(crypto_time_now_ns() - t_total, blocks_bytes);
+    crypto_ocl_profile_add_ghash_reduce_device_to_host(crypto_time_now_ns() - t_stage);
+#endif
+    if (st != CRYPTO_OK) {
+        if (evt_chunk) {
+            clReleaseEvent(evt_chunk);
+        }
+        if (evt_reduce) {
+            clReleaseEvent(evt_reduce);
+        }
+        return st;
+    }
+
+#ifdef CRYPTO_OCL_PROFILE
+    if (evt_chunk) {
+        cl_ulong te0 = 0;
+        cl_ulong te1 = 0;
+        if (clGetEventProfilingInfo(evt_chunk, CL_PROFILING_COMMAND_START, sizeof(cl_ulong), &te0, NULL) == CL_SUCCESS &&
+            clGetEventProfilingInfo(evt_chunk, CL_PROFILING_COMMAND_END, sizeof(cl_ulong), &te1, NULL) == CL_SUCCESS &&
+            te1 >= te0) {
+            device_chunk_ns = (uint64_t)(te1 - te0);
+        }
+        crypto_ocl_profile_add_ghash_kernel_enqueue(0, device_chunk_ns);
+        clReleaseEvent(evt_chunk);
+        evt_chunk = NULL;
+    }
+    if (evt_reduce) {
+        cl_ulong te0 = 0;
+        cl_ulong te1 = 0;
+        if (clGetEventProfilingInfo(evt_reduce, CL_PROFILING_COMMAND_START, sizeof(cl_ulong), &te0, NULL) == CL_SUCCESS &&
+            clGetEventProfilingInfo(evt_reduce, CL_PROFILING_COMMAND_END, sizeof(cl_ulong), &te1, NULL) == CL_SUCCESS &&
+            te1 >= te0) {
+            device_reduce_ns = (uint64_t)(te1 - te0);
+        }
+        crypto_ocl_profile_add_ghash_reduce_kernel_enqueue(0, device_reduce_ns);
+        clReleaseEvent(evt_reduce);
+        evt_reduce = NULL;
+    }
 #endif
 
-    free(chunk_hashes);
+    if (out_kernel_ns) {
+        *out_kernel_ns = device_chunk_ns + device_reduce_ns;
+    }
+
+    be64_store(final_hash[0], y_out);
+    be64_store(final_hash[1], y_out + 8);
+    secure_zero(final_hash, sizeof(final_hash));
+#ifdef CRYPTO_OCL_PROFILE
+    crypto_ocl_profile_add_ghash_total(crypto_time_now_ns() - t_total, blocks_bytes);
+#endif
     return CRYPTO_OK;
 }
 
@@ -1460,7 +1720,7 @@ crypto_status_t crypto_ocl_aes_gcm_encrypt(const uint8_t* key,
 
     if (plaintext_len) {
         t_stage = crypto_time_now_ns();
-        st = crypto_ocl_aes_gcm_ctr_xor_round_keys(aes.round_keys, crypto_aes_round_keys_bytes(&aes), j0, plaintext, ciphertext_out, plaintext_len, 1, &k1);
+        st = crypto_ocl_aes_gcm_ctr_xor_round_keys(aes.round_keys, crypto_aes_round_keys_bytes(&aes), j0, plaintext, ciphertext_out, plaintext_len, 1, 1, 1, &k1);
 #ifdef CRYPTO_OCL_PROFILE
         crypto_ocl_profile_add_gcm_ctr_stage(crypto_time_now_ns() - t_stage);
 #endif
@@ -1473,7 +1733,7 @@ crypto_status_t crypto_ocl_aes_gcm_encrypt(const uint8_t* key,
     }
 
     t_stage = crypto_time_now_ns();
-    st = gcm_ghash_opencl(h, aad, aad_len, ciphertext_out, plaintext_len, y, &k2);
+    st = gcm_ghash_opencl(h, aad, aad_len, plaintext_len ? ciphertext_out : NULL, plaintext_len, plaintext_len ? g_ctx.out_buf : NULL, y, &k2);
 #ifdef CRYPTO_OCL_PROFILE
     crypto_ocl_profile_add_gcm_ghash_stage(crypto_time_now_ns() - t_stage);
 #endif
@@ -1559,7 +1819,27 @@ crypto_status_t crypto_ocl_aes_gcm_decrypt(const uint8_t* key,
 #endif
 
     t_stage = crypto_time_now_ns();
-    st = gcm_ghash_opencl(h, aad, aad_len, ciphertext, ciphertext_len, y, &k2);
+    if (ciphertext_len) {
+        t_stage = crypto_time_now_ns();
+        st = ocl_init_if_needed();
+        if (st == CRYPTO_OK) {
+            st = ocl_ensure_io_buffers(ciphertext_len);
+        }
+        if (st == CRYPTO_OK) {
+            st = ocl_write_buffer(g_ctx.in_buf, 0, ciphertext, ciphertext_len);
+        }
+#ifdef CRYPTO_OCL_PROFILE
+        crypto_ocl_profile_add_ghash_host_to_device(crypto_time_now_ns() - t_stage);
+#endif
+        if (st != CRYPTO_OK) {
+            crypto_aes_clear(&aes);
+            secure_zero(h, sizeof(h));
+            secure_zero(j0, sizeof(j0));
+            return st;
+        }
+    }
+
+    st = gcm_ghash_opencl(h, aad, aad_len, ciphertext_len ? ciphertext : NULL, ciphertext_len, ciphertext_len ? g_ctx.in_buf : NULL, y, &k2);
 #ifdef CRYPTO_OCL_PROFILE
     crypto_ocl_profile_add_gcm_ghash_stage(crypto_time_now_ns() - t_stage);
 #endif
@@ -1596,7 +1876,7 @@ crypto_status_t crypto_ocl_aes_gcm_decrypt(const uint8_t* key,
 
     if (ciphertext_len) {
         t_stage = crypto_time_now_ns();
-        st = crypto_ocl_aes_gcm_ctr_xor_round_keys(aes.round_keys, crypto_aes_round_keys_bytes(&aes), j0, ciphertext, plaintext_out, ciphertext_len, 1, &k1);
+        st = crypto_ocl_aes_gcm_ctr_xor_round_keys(aes.round_keys, crypto_aes_round_keys_bytes(&aes), j0, NULL, plaintext_out, ciphertext_len, 1, 0, 1, &k1);
 #ifdef CRYPTO_OCL_PROFILE
         crypto_ocl_profile_add_gcm_ctr_stage(crypto_time_now_ns() - t_stage);
 #endif

@@ -93,3 +93,38 @@ __kernel void gcm_ghash_chunk(__global const uchar* blocks,
     chunk_hashes[out_idx + 0] = y_hi;
     chunk_hashes[out_idx + 1] = y_lo;
 }
+
+__kernel void gcm_ghash_reduce(__global const ulong* chunk_hashes,
+                               __global ulong* final_hash,
+                               ulong chunk_count,
+                               ulong pow_full_hi,
+                               ulong pow_full_lo,
+                               ulong pow_last_hi,
+                               ulong pow_last_lo)
+{
+    if (get_global_id(0) != 0) {
+        return;
+    }
+
+    ulong y_hi = 0;
+    ulong y_lo = 0;
+
+    for (ulong i = 0; i < chunk_count; i++) {
+        ulong chunk_hi = chunk_hashes[i * 2ul + 0ul];
+        ulong chunk_lo = chunk_hashes[i * 2ul + 1ul];
+        ulong mul_hi;
+        ulong mul_lo;
+
+        if (i + 1ul == chunk_count) {
+            gf128_mul(y_hi, y_lo, pow_last_hi, pow_last_lo, &mul_hi, &mul_lo);
+        } else {
+            gf128_mul(y_hi, y_lo, pow_full_hi, pow_full_lo, &mul_hi, &mul_lo);
+        }
+
+        y_hi = mul_hi ^ chunk_hi;
+        y_lo = mul_lo ^ chunk_lo;
+    }
+
+    final_hash[0] = y_hi;
+    final_hash[1] = y_lo;
+}

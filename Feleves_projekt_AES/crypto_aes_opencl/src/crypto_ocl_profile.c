@@ -113,6 +113,11 @@ void crypto_ocl_profile_add_ghash_host_to_device(uint64_t ns)
     g_stats.ghash_host_to_device_ns += ns;
 }
 
+void crypto_ocl_profile_add_ghash_device_copy(uint64_t ns)
+{
+    g_stats.ghash_device_copy_ns += ns;
+}
+
 void crypto_ocl_profile_add_ghash_set_args(uint64_t ns)
 {
     g_stats.ghash_set_args_ns += ns;
@@ -124,9 +129,25 @@ void crypto_ocl_profile_add_ghash_kernel_enqueue(uint64_t ns, uint64_t device_ns
     g_stats.ghash_kernel_device_ns += device_ns;
 }
 
+void crypto_ocl_profile_add_ghash_reduce_set_args(uint64_t ns)
+{
+    g_stats.ghash_reduce_set_args_ns += ns;
+}
+
+void crypto_ocl_profile_add_ghash_reduce_kernel_enqueue(uint64_t ns, uint64_t device_ns)
+{
+    g_stats.ghash_reduce_kernel_enqueue_ns += ns;
+    g_stats.ghash_reduce_kernel_device_ns += device_ns;
+}
+
 void crypto_ocl_profile_add_ghash_device_to_host(uint64_t ns)
 {
     g_stats.ghash_device_to_host_ns += ns;
+}
+
+void crypto_ocl_profile_add_ghash_reduce_device_to_host(uint64_t ns)
+{
+    g_stats.ghash_reduce_device_to_host_ns += ns;
 }
 
 void crypto_ocl_profile_add_ghash_cpu_reduce(uint64_t ns)
