@@ -14,13 +14,8 @@
     <OpenClProjectDir>$(NativeProjectsRoot)\crypto_aes_opencl</OpenClProjectDir>
     <AesLibProjectDir>$(NativeProjectsRoot)\aeslib</AesLibProjectDir>
     <KernelLoaderProjectDir>$(NativeProjectsRoot)\kernel_loader</KernelLoaderProjectDir>
-    <NativeMakeCommand Condition="'$(NativeMakeCommand)' == ''">make</NativeMakeCommand>
     <NativeBuildSubdir Condition="'$(NativeBuildSubdir)' == ''">$(PlatformTarget)</NativeBuildSubdir>
-    <NativeCc Condition="'$(NativeCc)' == '' and '$(PlatformTarget)' == 'x86'">i686-w64-mingw32-gcc</NativeCc>
-    <NativeCc Condition="'$(NativeCc)' == '' and '$(PlatformTarget)' == 'x64'">gcc</NativeCc>
-    <NativeAr Condition="'$(NativeAr)' == '' and '$(PlatformTarget)' == 'x86'">i686-w64-mingw32-ar</NativeAr>
-    <NativeAr Condition="'$(NativeAr)' == '' and '$(PlatformTarget)' == 'x64'">ar</NativeAr>
-    <NativeMakeArguments>BUILD_SUBDIR=$(NativeBuildSubdir) CC=$(NativeCc) AR=$(NativeAr)</NativeMakeArguments>
+    <NativeBuildScript>$(MSBuildProjectDirectory)\build_native.cmd</NativeBuildScript>
     <OpenClBuildBinDir>$(OpenClProjectDir)\build\$(NativeBuildSubdir)\bin</OpenClBuildBinDir>
     <AesLibBuildBinDir>$(AesLibProjectDir)\build\$(NativeBuildSubdir)\bin</AesLibBuildBinDir>
     <KernelLoaderBuildBinDir>$(KernelLoaderProjectDir)\build\$(NativeBuildSubdir)\bin</KernelLoaderBuildBinDir>
@@ -28,7 +23,7 @@
 
   <Target Name="BuildNativeDependencies" BeforeTargets="Build" Condition="$([MSBuild]::IsOSPlatform('Windows'))">
     <Message Text="Building native AES dependencies for $(PlatformTarget)..." Importance="high" />
-    <Exec WorkingDirectory="$(OpenClProjectDir)" Command="$(NativeMakeCommand) shared $(NativeMakeArguments)" ContinueOnError="false" />
+    <Exec WorkingDirectory="$(MSBuildProjectDirectory)" Command="&quot;$(NativeBuildScript)&quot; $(PlatformTarget) &quot;$(OpenClProjectDir)&quot;" ContinueOnError="false" />
   </Target>
 
   <Target Name="CopyNativeDependencies" AfterTargets="Build" Condition="$([MSBuild]::IsOSPlatform('Windows'))">
