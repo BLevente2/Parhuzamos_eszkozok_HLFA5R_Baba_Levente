@@ -277,6 +277,9 @@ crypto_status_t crypto_aes_init(crypto_aes_t* aes, const uint8_t* key, size_t ke
 
 void crypto_aes_encrypt_block(const crypto_aes_t* aes, const uint8_t in_block[16], uint8_t out_block[16])
 {
+#ifdef CRYPTO_PROFILE
+    uint64_t t0 = crypto_time_now_ns();
+#endif
     uint8_t state[16];
     int round;
     int rounds;
@@ -300,10 +303,16 @@ void crypto_aes_encrypt_block(const crypto_aes_t* aes, const uint8_t in_block[16
 
     memcpy(out_block, state, 16);
     secure_zero(state, sizeof(state));
+#ifdef CRYPTO_PROFILE
+    crypto_profile_add_aes_encrypt_block(crypto_time_now_ns() - t0);
+#endif
 }
 
 void crypto_aes_decrypt_block(const crypto_aes_t* aes, const uint8_t in_block[16], uint8_t out_block[16])
 {
+#ifdef CRYPTO_PROFILE
+    uint64_t t0 = crypto_time_now_ns();
+#endif
     uint8_t state[16];
     int round;
     int rounds;
@@ -327,6 +336,9 @@ void crypto_aes_decrypt_block(const crypto_aes_t* aes, const uint8_t in_block[16
 
     memcpy(out_block, state, 16);
     secure_zero(state, sizeof(state));
+#ifdef CRYPTO_PROFILE
+    crypto_profile_add_aes_decrypt_block(crypto_time_now_ns() - t0);
+#endif
 }
 
 void crypto_aes_clear(crypto_aes_t* aes)

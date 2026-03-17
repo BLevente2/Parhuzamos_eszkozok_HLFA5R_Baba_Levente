@@ -1,5 +1,10 @@
 #include "crypto_gf128.h"
 
+#ifdef CRYPTO_PROFILE
+#include "crypto_profile.h"
+#include "crypto_timer.h"
+#endif
+
 static uint64_t be64_load(const uint8_t b[8])
 {
     return ((uint64_t)b[0] << 56) |
@@ -41,6 +46,9 @@ static void gf128_shift_right(uint64_t* hi, uint64_t* lo)
 
 void crypto_gf128_mul(const uint8_t x[16], const uint8_t y[16], uint8_t out[16])
 {
+#ifdef CRYPTO_PROFILE
+    uint64_t t0 = crypto_time_now_ns();
+#endif
     uint64_t z_hi = 0;
     uint64_t z_lo = 0;
 
@@ -65,6 +73,9 @@ void crypto_gf128_mul(const uint8_t x[16], const uint8_t y[16], uint8_t out[16])
 
     be64_store(z_hi, out);
     be64_store(z_lo, out + 8);
+#ifdef CRYPTO_PROFILE
+    crypto_profile_add_gf128_mul(crypto_time_now_ns() - t0);
+#endif
 }
 
 static void gf128_set_one(uint8_t out[16])
@@ -77,6 +88,9 @@ static void gf128_set_one(uint8_t out[16])
 
 void crypto_gf128_pow(const uint8_t h[16], uint64_t exponent, uint8_t out[16])
 {
+#ifdef CRYPTO_PROFILE
+    uint64_t t0 = crypto_time_now_ns();
+#endif
     uint8_t result[16];
     uint8_t base[16];
     uint8_t tmp[16];
@@ -105,4 +119,7 @@ void crypto_gf128_pow(const uint8_t h[16], uint64_t exponent, uint8_t out[16])
     for (int i = 0; i < 16; i++) {
         out[i] = result[i];
     }
+#ifdef CRYPTO_PROFILE
+    crypto_profile_add_gf128_pow(crypto_time_now_ns() - t0);
+#endif
 }

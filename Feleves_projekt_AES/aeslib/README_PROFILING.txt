@@ -14,25 +14,32 @@ Outputs:
 Run benchmark:
   build\bin\bench_aes.exe
 
-The benchmark prints throughput numbers for:
-  - AES-128 / AES-192 / AES-256 CTR
-  - AES-128 / AES-192 / AES-256 block encryption
-
-No-instrumentation build (default):
-  PROF=0 (default)
-
-Optional internal instrumentation counters:
+Run profiler build:
   mingw32-make clean
   mingw32-make PROF=1 all
+  build\bin\profile_aes.exe
 
-Optional "fast" build flags (good for benchmarks on your current CPU):
+Profiler output highlights:
+  - AES-CTR stage breakdown
+  - AES-GCM top-level stages and internal hotspots
+  - AES-CBC encrypt and decrypt bottlenecks
+  - Optimization hints based on measured hotspots
+
+No-instrumentation build (default):
+  PROF=0
+
+Instrumentation build:
+  PROF=1
+  This adds detailed counters and builds profile_aes.exe.
+
+Optional fast build flags:
   mingw32-make clean
   mingw32-make FAST=1 all
 
-You can combine flags, e.g.:
-  mingw32-make FAST=1 PROF=0 all
+You can combine flags:
+  mingw32-make FAST=1 PROF=1 all
 
-Optional gprof build (heavy):
+Optional gprof build:
   mingw32-make clean
   mingw32-make GPROF=1 all
   build\bin\bench_aes.exe

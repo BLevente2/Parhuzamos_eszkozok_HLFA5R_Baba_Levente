@@ -1,5 +1,10 @@
 #include "crypto_padding.h"
 
+#ifdef CRYPTO_PROFILE
+#include "crypto_profile.h"
+#include "crypto_timer.h"
+#endif
+
 static size_t crypto_padding_block_size(void)
 {
     return 16;
@@ -56,6 +61,9 @@ crypto_status_t crypto_padding_padded_size(size_t n, crypto_padding_t padding, s
 
 void crypto_padding_apply_block(uint8_t block[16], const uint8_t* tail, size_t tail_len, crypto_padding_t padding)
 {
+#ifdef CRYPTO_PROFILE
+    uint64_t t0 = crypto_time_now_ns();
+#endif
     size_t i;
     size_t pad_len = crypto_padding_block_size() - tail_len;
 
@@ -67,6 +75,9 @@ void crypto_padding_apply_block(uint8_t block[16], const uint8_t* tail, size_t t
         for (i = tail_len; i < crypto_padding_block_size(); i++) {
             block[i] = (uint8_t)pad_len;
         }
+        #ifdef CRYPTO_PROFILE
+        crypto_profile_add_padding_apply(crypto_time_now_ns() - t0);
+        #endif
         return;
     }
 
@@ -75,6 +86,9 @@ void crypto_padding_apply_block(uint8_t block[16], const uint8_t* tail, size_t t
             block[i] = 0;
         }
         block[crypto_padding_block_size() - 1] = (uint8_t)pad_len;
+        #ifdef CRYPTO_PROFILE
+        crypto_profile_add_padding_apply(crypto_time_now_ns() - t0);
+        #endif
         return;
     }
 
@@ -84,6 +98,9 @@ void crypto_padding_apply_block(uint8_t block[16], const uint8_t* tail, size_t t
             for (i = tail_len + 1; i < crypto_padding_block_size(); i++) {
                 block[i] = 0;
             }
+            #ifdef CRYPTO_PROFILE
+            crypto_profile_add_padding_apply(crypto_time_now_ns() - t0);
+            #endif
             return;
         }
     }
@@ -92,16 +109,25 @@ void crypto_padding_apply_block(uint8_t block[16], const uint8_t* tail, size_t t
         for (i = tail_len; i < crypto_padding_block_size(); i++) {
             block[i] = 0;
         }
+        #ifdef CRYPTO_PROFILE
+        crypto_profile_add_padding_apply(crypto_time_now_ns() - t0);
+        #endif
         return;
     }
 
     for (i = tail_len; i < crypto_padding_block_size(); i++) {
         block[i] = 0;
     }
+#ifdef CRYPTO_PROFILE
+    crypto_profile_add_padding_apply(crypto_time_now_ns() - t0);
+#endif
 }
 
 crypto_status_t crypto_padding_remove(const uint8_t* buf, size_t buf_len, crypto_padding_t padding, size_t* out_len)
 {
+#ifdef CRYPTO_PROFILE
+    uint64_t t0 = crypto_time_now_ns();
+#endif
     size_t pad_len;
     size_t i;
 
@@ -119,6 +145,9 @@ crypto_status_t crypto_padding_remove(const uint8_t* buf, size_t buf_len, crypto
 
     if (padding == CRYPTO_PADDING_NONE) {
         *out_len = buf_len;
+#ifdef CRYPTO_PROFILE
+        crypto_profile_add_padding_remove(crypto_time_now_ns() - t0);
+#endif
         return CRYPTO_OK;
     }
 
@@ -128,6 +157,9 @@ crypto_status_t crypto_padding_remove(const uint8_t* buf, size_t buf_len, crypto
             i2--;
         }
         *out_len = i2;
+#ifdef CRYPTO_PROFILE
+        crypto_profile_add_padding_remove(crypto_time_now_ns() - t0);
+#endif
         return CRYPTO_OK;
     }
 
@@ -148,6 +180,9 @@ crypto_status_t crypto_padding_remove(const uint8_t* buf, size_t buf_len, crypto
             return CRYPTO_BAD_PADDING;
         }
         *out_len = i2 - 1;
+#ifdef CRYPTO_PROFILE
+        crypto_profile_add_padding_remove(crypto_time_now_ns() - t0);
+#endif
         return CRYPTO_OK;
     }
 
@@ -167,12 +202,18 @@ crypto_status_t crypto_padding_remove(const uint8_t* buf, size_t buf_len, crypto
             }
         }
         *out_len = buf_len - pad_len;
+#ifdef CRYPTO_PROFILE
+        crypto_profile_add_padding_remove(crypto_time_now_ns() - t0);
+#endif
         return CRYPTO_OK;
     }
 
     if (padding == CRYPTO_PADDING_ANSIX923) {
         if (pad_len == 1) {
             *out_len = buf_len - pad_len;
+#ifdef CRYPTO_PROFILE
+            crypto_profile_add_padding_remove(crypto_time_now_ns() - t0);
+#endif
             return CRYPTO_OK;
         }
         for (i = 1; i < pad_len; i++) {
@@ -181,6 +222,9 @@ crypto_status_t crypto_padding_remove(const uint8_t* buf, size_t buf_len, crypto
             }
         }
         *out_len = buf_len - pad_len;
+#ifdef CRYPTO_PROFILE
+        crypto_profile_add_padding_remove(crypto_time_now_ns() - t0);
+#endif
         return CRYPTO_OK;
     }
 

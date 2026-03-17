@@ -121,7 +121,7 @@ crypto_status_t crypto_cbc_encrypt_buffer(const crypto_cbc_t* cbc,
     secure_zero(block, sizeof(block));
 
 #ifdef CRYPTO_PROFILE
-    crypto_profile_add_cbc_encrypt(crypto_time_now_ns() - t0);
+    crypto_profile_add_cbc_encrypt(crypto_time_now_ns() - t0, plaintext_len);
 #endif
 
     return CRYPTO_OK;
@@ -199,7 +199,7 @@ crypto_status_t crypto_cbc_decrypt_buffer(const crypto_cbc_t* cbc,
     secure_zero(block, sizeof(block));
 
 #ifdef CRYPTO_PROFILE
-    crypto_profile_add_cbc_decrypt(crypto_time_now_ns() - t0);
+    crypto_profile_add_cbc_decrypt(crypto_time_now_ns() - t0, ciphertext_len);
 #endif
 
     return CRYPTO_OK;

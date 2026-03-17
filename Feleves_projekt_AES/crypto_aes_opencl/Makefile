@@ -75,8 +75,8 @@ endif
 
 DEPS_LDFLAGS := $(DEPS_LD_DIRS) $(DEPS_LD_LIBS) $(RPATH_LDFLAGS)
 
-SRC := src/opencl_aes_ctr.c src/crypto_ffi_opencl.c
-OBJ := build/obj/opencl_aes_ctr.o build/obj/crypto_ffi_opencl.o
+SRC := src/opencl_aes_ctr.c src/crypto_ffi_opencl.c src/crypto_ocl_profile.c
+OBJ := build/obj/opencl_aes_ctr.o build/obj/crypto_ffi_opencl.o build/obj/crypto_ocl_profile.o
 
 LIB_STATIC := build/lib/libcrypto_aes_opencl.a
 
@@ -88,6 +88,10 @@ BENCH_SRC := tests/bench_opencl_aes.c
 BENCH_OBJ := build/obj/bench_opencl_aes.o
 BENCH_BIN := build/bin/bench_opencl_aes$(EXE)
 
+PROFILE_SRC := tests/profile_opencl_aes.c
+PROFILE_OBJ := build/obj/profile_opencl_aes.o
+PROFILE_BIN := build/bin/profile_opencl_aes$(EXE)
+
 ifeq ($(OS),Windows_NT)
 SHARED_LIB := build/bin/crypto_aes_opencl$(SHARED_EXT)
 IMPORT_LIB := build/lib/libcrypto_aes_opencl.dll.a
@@ -96,9 +100,15 @@ SHARED_LIB := build/bin/libcrypto_aes_opencl$(SHARED_EXT)
 IMPORT_LIB :=
 endif
 
-.PHONY: all deps copy_deps lib shared test bench copy_kernels clean build_dirs
+.PHONY: all deps copy_deps lib shared test bench profile copy_kernels clean build_dirs
 
 .NOTPARALLEL: all deps copy_deps lib shared test bench copy_kernels
+
+ifeq ($(PROF),1)
+PROFILE_TARGET := profile
+else
+PROFILE_TARGET :=
+endif
 
 all:
 	$(MAKE) deps
@@ -106,6 +116,9 @@ all:
 	$(MAKE) shared
 	$(MAKE) test
 	$(MAKE) bench
+ifeq ($(PROF),1)
+	$(MAKE) profile
+endif
 	$(MAKE) copy_kernels
 	$(MAKE) copy_deps
 
@@ -146,6 +159,8 @@ test: deps $(TEST_BIN) copy_kernels copy_deps
 
 bench: deps $(BENCH_BIN) copy_kernels copy_deps
 
+profile: deps $(PROFILE_BIN) copy_kernels copy_deps
+
 $(LIB_STATIC): build_dirs $(OBJ)
 	$(AR) rcs $(LIB_STATIC) $(OBJ)
 
@@ -163,6 +178,12 @@ $(BENCH_OBJ): $(BENCH_SRC) build_dirs
 
 $(BENCH_BIN): build_dirs $(LIB_STATIC) $(BENCH_OBJ)
 	$(CC) $(CFLAGS) $(BENCH_OBJ) $(LIB_STATIC) -o $(BENCH_BIN) $(LDFLAGS) $(OPENCL_LIBS) $(DEPS_LDFLAGS)
+
+$(PROFILE_OBJ): $(PROFILE_SRC) build_dirs
+	$(CC) $(CFLAGS) -c $(PROFILE_SRC) -o $(PROFILE_OBJ)
+
+$(PROFILE_BIN): build_dirs $(LIB_STATIC) $(PROFILE_OBJ)
+	$(CC) $(CFLAGS) $(PROFILE_OBJ) $(LIB_STATIC) -o $(PROFILE_BIN) $(LDFLAGS) $(OPENCL_LIBS) $(DEPS_LDFLAGS)
 
 ifeq ($(OS),Windows_NT)
 $(SHARED_LIB): build_dirs $(OBJ)

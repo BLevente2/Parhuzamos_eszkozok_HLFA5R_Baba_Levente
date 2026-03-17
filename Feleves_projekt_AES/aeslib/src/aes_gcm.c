@@ -5,6 +5,11 @@
 #include "aes.h"
 #include "crypto_gf128.h"
 
+#ifdef CRYPTO_PROFILE
+#include "crypto_profile.h"
+#include "crypto_timer.h"
+#endif
+
 static void secure_zero(void* p, size_t n)
 {
     volatile uint8_t* v = (volatile uint8_t*)p;
@@ -91,12 +96,18 @@ static void ghash_lengths(const uint8_t h[16], uint8_t y[16], uint64_t aad_len, 
 
 static void gcm_compute_j0(const uint8_t h[16], const uint8_t* iv, size_t iv_len, uint8_t j0[16])
 {
+#ifdef CRYPTO_PROFILE
+    uint64_t t0 = crypto_time_now_ns();
+#endif
     if (iv_len == 12) {
         memcpy(j0, iv, 12);
         j0[12] = 0;
         j0[13] = 0;
         j0[14] = 0;
         j0[15] = 1;
+#ifdef CRYPTO_PROFILE
+        crypto_profile_add_aes_gcm_j0(crypto_time_now_ns() - t0);
+#endif
         return;
     }
 
@@ -106,6 +117,9 @@ static void gcm_compute_j0(const uint8_t h[16], const uint8_t* iv, size_t iv_len
 
     ghash_update_bytes(h, j0, iv, iv_len);
     ghash_lengths(h, j0, 0, (uint64_t)iv_len);
+#ifdef CRYPTO_PROFILE
+    crypto_profile_add_aes_gcm_j0(crypto_time_now_ns() - t0);
+#endif
 }
 
 static void gcm_inc32(uint8_t ctr[16])
@@ -117,6 +131,9 @@ static void gcm_inc32(uint8_t ctr[16])
 
 static void gcm_ctr_xor(const crypto_aes_t* aes, const uint8_t j0[16], const uint8_t* input, uint8_t* output, size_t len)
 {
+#ifdef CRYPTO_PROFILE
+    uint64_t t0 = crypto_time_now_ns();
+#endif
     uint8_t ctr[16];
     uint8_t ks[16];
     size_t blocks = (len + 15) / 16;
@@ -137,6 +154,9 @@ static void gcm_ctr_xor(const crypto_aes_t* aes, const uint8_t j0[16], const uin
 
     secure_zero(ctr, sizeof(ctr));
     secure_zero(ks, sizeof(ks));
+#ifdef CRYPTO_PROFILE
+    crypto_profile_add_aes_gcm_ctr(crypto_time_now_ns() - t0);
+#endif
 }
 
 static void gcm_auth_tag(const crypto_aes_t* aes,
@@ -149,6 +169,10 @@ static void gcm_auth_tag(const crypto_aes_t* aes,
                          size_t ciphertext_len,
                          uint8_t tag16_out[16])
 {
+#ifdef CRYPTO_PROFILE
+    uint64_t t0 = crypto_time_now_ns();
+    uint64_t tf = 0;
+#endif
     uint8_t j0[16];
     uint8_t y[16];
     uint8_t s[16];
@@ -169,12 +193,21 @@ static void gcm_auth_tag(const crypto_aes_t* aes,
 
     ghash_lengths(h, y, (uint64_t)aad_len, (uint64_t)ciphertext_len);
 
+#ifdef CRYPTO_PROFILE
+    tf = crypto_time_now_ns();
+#endif
     crypto_aes_encrypt_block(aes, j0, s);
     crypto_gf128_xor(tag16_out, y, s);
+#ifdef CRYPTO_PROFILE
+    crypto_profile_add_aes_gcm_auth_finalize(crypto_time_now_ns() - tf);
+#endif
 
     secure_zero(j0, sizeof(j0));
     secure_zero(y, sizeof(y));
     secure_zero(s, sizeof(s));
+#ifdef CRYPTO_PROFILE
+    crypto_profile_add_aes_gcm_auth(crypto_time_now_ns() - t0);
+#endif
 }
 
 crypto_status_t crypto_aes_gcm_encrypt(const uint8_t* key,
@@ -188,6 +221,9 @@ crypto_status_t crypto_aes_gcm_encrypt(const uint8_t* key,
                                       uint8_t* ciphertext,
                                       uint8_t tag16_out[16])
 {
+#ifdef CRYPTO_PROFILE
+    uint64_t t0 = crypto_time_now_ns();
+#endif
     crypto_aes_t aes;
     crypto_status_t st;
     uint8_t h[16];
@@ -224,6 +260,9 @@ crypto_status_t crypto_aes_gcm_encrypt(const uint8_t* key,
     crypto_aes_clear(&aes);
     secure_zero(h, sizeof(h));
     secure_zero(j0, sizeof(j0));
+#ifdef CRYPTO_PROFILE
+    crypto_profile_add_aes_gcm_encrypt(crypto_time_now_ns() - t0, plaintext_len);
+#endif
     return CRYPTO_OK;
 }
 
@@ -238,6 +277,9 @@ crypto_status_t crypto_aes_gcm_decrypt(const uint8_t* key,
                                       const uint8_t tag16[16],
                                       uint8_t* plaintext_out)
 {
+#ifdef CRYPTO_PROFILE
+    uint64_t t0 = crypto_time_now_ns();
+#endif
     crypto_aes_t aes;
     crypto_status_t st;
     uint8_t h[16];
@@ -279,5 +321,8 @@ crypto_status_t crypto_aes_gcm_decrypt(const uint8_t* key,
     secure_zero(h, sizeof(h));
     secure_zero(expected, sizeof(expected));
     secure_zero(j0, sizeof(j0));
+#ifdef CRYPTO_PROFILE
+    crypto_profile_add_aes_gcm_decrypt(crypto_time_now_ns() - t0, ciphertext_len);
+#endif
     return CRYPTO_OK;
 }

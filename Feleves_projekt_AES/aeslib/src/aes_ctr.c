@@ -1,5 +1,10 @@
 #include "aes_ctr.h"
 
+#ifdef CRYPTO_PROFILE
+#include "crypto_profile.h"
+#include "crypto_timer.h"
+#endif
+
 static uint64_t be64_load(const uint8_t b[8])
 {
     return ((uint64_t)b[0] << 56) |
@@ -40,6 +45,11 @@ crypto_status_t crypto_aes_ctr_xor_aes(const crypto_aes_t* aes,
                                       size_t len,
                                       uint64_t block_offset)
 {
+#ifdef CRYPTO_PROFILE
+    uint64_t t0 = crypto_time_now_ns();
+    uint64_t counter_ns = 0;
+    uint64_t xor_ns = 0;
+#endif
     uint64_t iv_hi;
     uint64_t iv_lo;
     size_t blocks;
@@ -64,17 +74,40 @@ crypto_status_t crypto_aes_ctr_xor_aes(const crypto_aes_t* aes,
         size_t off = b * 16;
         size_t n = (len - off) >= 16 ? 16 : (len - off);
 
+#ifdef CRYPTO_PROFILE
+        {
+            uint64_t tc = crypto_time_now_ns();
+            u128_add_u64(iv_hi, iv_lo, block_offset + (uint64_t)b, &c_hi, &c_lo);
+            be64_store(c_hi, counter);
+            be64_store(c_lo, counter + 8);
+            counter_ns += crypto_time_now_ns() - tc;
+        }
+#else
         u128_add_u64(iv_hi, iv_lo, block_offset + (uint64_t)b, &c_hi, &c_lo);
         be64_store(c_hi, counter);
         be64_store(c_lo, counter + 8);
+#endif
 
         crypto_aes_encrypt_block(aes, counter, ks);
 
+#ifdef CRYPTO_PROFILE
+        {
+            uint64_t tx = crypto_time_now_ns();
+            for (size_t i = 0; i < n; i++) {
+                output[off + i] = (uint8_t)(input[off + i] ^ ks[i]);
+            }
+            xor_ns += crypto_time_now_ns() - tx;
+        }
+#else
         for (size_t i = 0; i < n; i++) {
             output[off + i] = (uint8_t)(input[off + i] ^ ks[i]);
         }
+#endif
     }
 
+#ifdef CRYPTO_PROFILE
+    crypto_profile_add_aes_ctr(crypto_time_now_ns() - t0, len, counter_ns, xor_ns);
+#endif
     return CRYPTO_OK;
 }
 

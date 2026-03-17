@@ -64,6 +64,10 @@ BENCH_SRC := tests/bench_aes.c
 BENCH_OBJ := build/obj/bench_aes.o
 BENCH_BIN := build/bin/bench_aes$(EXE)
 
+PROFILE_SRC := tests/profile_aes.c
+PROFILE_OBJ := build/obj/profile_aes.o
+PROFILE_BIN := build/bin/profile_aes$(EXE)
+
 ifeq ($(OS),Windows_NT)
 SHARED_LIB := build/bin/crypto_aes$(SHARED_EXT)
 IMPORT_LIB := build/lib/libcrypto_aes.dll.a
@@ -72,9 +76,15 @@ SHARED_LIB := build/bin/libcrypto_aes$(SHARED_EXT)
 IMPORT_LIB :=
 endif
 
-.PHONY: all lib shared test bench clean
+.PHONY: all lib shared test bench profile clean
 
-all: lib shared test bench
+ifeq ($(PROF),1)
+PROFILE_TARGET := profile
+else
+PROFILE_TARGET :=
+endif
+
+all: lib shared test bench $(PROFILE_TARGET)
 
 build_dirs:
 	$(MKDIR_BUILD)
@@ -89,6 +99,8 @@ shared: $(SHARED_LIB)
 test: $(TEST_BIN)
 
 bench: $(BENCH_BIN)
+
+profile: $(PROFILE_BIN)
 
 $(LIB_STATIC): build_dirs $(OBJ)
 	$(AR) rcs $(LIB_STATIC) $(OBJ)
@@ -107,6 +119,12 @@ $(BENCH_OBJ): $(BENCH_SRC) build_dirs
 
 $(BENCH_BIN): build_dirs $(LIB_STATIC) $(BENCH_OBJ)
 	$(CC) $(CFLAGS) $(BENCH_OBJ) $(LIB_STATIC) -o $(BENCH_BIN) $(LDFLAGS)
+
+$(PROFILE_OBJ): $(PROFILE_SRC) build_dirs
+	$(CC) $(CFLAGS) -c $(PROFILE_SRC) -o $(PROFILE_OBJ)
+
+$(PROFILE_BIN): build_dirs $(LIB_STATIC) $(PROFILE_OBJ)
+	$(CC) $(CFLAGS) $(PROFILE_OBJ) $(LIB_STATIC) -o $(PROFILE_BIN) $(LDFLAGS)
 
 ifeq ($(OS),Windows_NT)
 $(SHARED_LIB): build_dirs $(OBJ)
