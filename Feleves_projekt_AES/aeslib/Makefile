@@ -1,37 +1,62 @@
 ifeq ($(OS),Windows_NT)
 SHELL := cmd.exe
 .SHELLFLAGS := /C
-MKDIR_BUILD := if not exist build mkdir build
-MKDIR_OBJ := if not exist build\obj mkdir build\obj
-MKDIR_BIN := if not exist build\bin mkdir build\bin
-MKDIR_LIB := if not exist build\lib mkdir build\lib
+else
+SHELL := /bin/sh
+.SHELLFLAGS := -c
+endif
+
+BUILD_SUBDIR ?=
+BUILD_ROOT := build$(if $(BUILD_SUBDIR),/$(BUILD_SUBDIR),)
+OBJ_DIR := $(BUILD_ROOT)/obj
+BIN_DIR := $(BUILD_ROOT)/bin
+LIB_DIR := $(BUILD_ROOT)/lib
+BUILD_ROOT_WIN := $(subst /,\,$(BUILD_ROOT))
+OBJ_DIR_WIN := $(subst /,\,$(OBJ_DIR))
+BIN_DIR_WIN := $(subst /,\,$(BIN_DIR))
+LIB_DIR_WIN := $(subst /,\,$(LIB_DIR))
+
+ifeq ($(OS),Windows_NT)
+MKDIR_BUILD := if not exist "$(BUILD_ROOT_WIN)" mkdir "$(BUILD_ROOT_WIN)"
+MKDIR_OBJ := if not exist "$(OBJ_DIR_WIN)" mkdir "$(OBJ_DIR_WIN)"
+MKDIR_BIN := if not exist "$(BIN_DIR_WIN)" mkdir "$(BIN_DIR_WIN)"
+MKDIR_LIB := if not exist "$(LIB_DIR_WIN)" mkdir "$(LIB_DIR_WIN)"
 RM_F := del /Q
 RMDIR := rmdir /S /Q
 EXE := .exe
 SHARED_EXT := .dll
 else
-MKDIR_BUILD := mkdir -p build
-MKDIR_OBJ := mkdir -p build/obj
-MKDIR_BIN := mkdir -p build/bin
-MKDIR_LIB := mkdir -p build/lib
+MKDIR_BUILD := mkdir -p "$(BUILD_ROOT)"
+MKDIR_OBJ := mkdir -p "$(OBJ_DIR)"
+MKDIR_BIN := mkdir -p "$(BIN_DIR)"
+MKDIR_LIB := mkdir -p "$(LIB_DIR)"
 RM_F := rm -f
 RMDIR := rm -rf
 EXE :=
 SHARED_EXT := .so
 endif
 
+ifeq ($(origin CC),default)
 CC := gcc
-AR := ar
+endif
+AR ?= ar
 
 PROF ?= 0
 GPROF ?= 0
 FAST ?= 0
+STRICT ?= 0
 
 CFLAGS_BASE := -std=c99 -O2 -Wall -Wextra -Iinclude
 
 ifeq ($(FAST),1)
-CFLAGS_BASE := -std=c99 -O3 -march=native -fomit-frame-pointer -funroll-loops -Wall -Wextra -Iinclude
+MARCH ?= native
+CFLAGS_BASE := -std=c99 -O3 -march=$(MARCH) -fomit-frame-pointer -funroll-loops -Wall -Wextra -Iinclude
 endif
+
+ifeq ($(STRICT),1)
+CFLAGS_BASE += -Wpedantic -Wconversion -Wshadow -Wstrict-prototypes
+endif
+
 LDFLAGS :=
 
 ifeq ($(PROF),1)
@@ -52,31 +77,32 @@ endif
 CFLAGS := $(CFLAGS_BASE) $(PIC)
 
 SRC := src/aes.c src/aes_ctr.c src/aes_gcm.c src/cbc.c src/crypto_gf128.c src/crypto_padding.c src/crypto_timer.c src/crypto_profile.c src/crypto_ffi.c
-OBJ := build/obj/aes.o build/obj/aes_ctr.o build/obj/aes_gcm.o build/obj/cbc.o build/obj/crypto_gf128.o build/obj/crypto_padding.o build/obj/crypto_timer.o build/obj/crypto_profile.o build/obj/crypto_ffi.o
+OBJ := $(OBJ_DIR)/aes.o $(OBJ_DIR)/aes_ctr.o $(OBJ_DIR)/aes_gcm.o $(OBJ_DIR)/cbc.o $(OBJ_DIR)/crypto_gf128.o $(OBJ_DIR)/crypto_padding.o $(OBJ_DIR)/crypto_timer.o $(OBJ_DIR)/crypto_profile.o $(OBJ_DIR)/crypto_ffi.o
 
-LIB_STATIC := build/lib/libcrypto_aes.a
+LIB_STATIC := $(LIB_DIR)/libcrypto_aes.a
 
 TEST_SRC := tests/test_aes.c
-TEST_OBJ := build/obj/test_aes.o
-TEST_BIN := build/bin/test_aes$(EXE)
+TEST_OBJ := $(OBJ_DIR)/test_aes.o
+TEST_BIN := $(BIN_DIR)/test_aes$(EXE)
 
 BENCH_SRC := tests/bench_aes.c
-BENCH_OBJ := build/obj/bench_aes.o
-BENCH_BIN := build/bin/bench_aes$(EXE)
+BENCH_OBJ := $(OBJ_DIR)/bench_aes.o
+BENCH_BIN := $(BIN_DIR)/bench_aes$(EXE)
 
 PROFILE_SRC := tests/profile_aes.c
-PROFILE_OBJ := build/obj/profile_aes.o
-PROFILE_BIN := build/bin/profile_aes$(EXE)
+PROFILE_OBJ := $(OBJ_DIR)/profile_aes.o
+PROFILE_BIN := $(BIN_DIR)/profile_aes$(EXE)
 
 ifeq ($(OS),Windows_NT)
-SHARED_LIB := build/bin/crypto_aes$(SHARED_EXT)
-IMPORT_LIB := build/lib/libcrypto_aes.dll.a
+SHARED_LIB := $(BIN_DIR)/crypto_aes$(SHARED_EXT)
+IMPORT_LIB := $(LIB_DIR)/libcrypto_aes.dll.a
+IMPORT_LIB_WIN := $(subst /,\,$(IMPORT_LIB))
 else
-SHARED_LIB := build/bin/libcrypto_aes$(SHARED_EXT)
+SHARED_LIB := $(BIN_DIR)/libcrypto_aes$(SHARED_EXT)
 IMPORT_LIB :=
 endif
 
-.PHONY: all lib shared test bench profile clean
+.PHONY: all lib shared test bench profile clean build_dirs
 
 ifeq ($(PROF),1)
 PROFILE_TARGET := profile
@@ -105,7 +131,7 @@ profile: $(PROFILE_BIN)
 $(LIB_STATIC): build_dirs $(OBJ)
 	$(AR) rcs $(LIB_STATIC) $(OBJ)
 
-build/obj/%.o: src/%.c build_dirs
+$(OBJ_DIR)/%.o: src/%.c build_dirs
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(TEST_OBJ): $(TEST_SRC) build_dirs
@@ -128,7 +154,7 @@ $(PROFILE_BIN): build_dirs $(LIB_STATIC) $(PROFILE_OBJ)
 
 ifeq ($(OS),Windows_NT)
 $(SHARED_LIB): build_dirs $(OBJ)
-	$(CC) -shared -o $(SHARED_LIB) $(OBJ) -Wl,--out-implib,$(IMPORT_LIB) -Wl,--export-all-symbols $(LDFLAGS)
+	$(CC) -shared -o $(SHARED_LIB) $(OBJ) -Wl,--out-implib,$(IMPORT_LIB_WIN) -Wl,--export-all-symbols $(LDFLAGS)
 else
 $(SHARED_LIB): build_dirs $(OBJ)
 	$(CC) -shared -o $(SHARED_LIB) $(OBJ) $(LDFLAGS)
@@ -136,15 +162,15 @@ endif
 
 clean:
 ifeq ($(OS),Windows_NT)
-	-$(RM_F) build\obj\*.o 2>nul
-	-$(RM_F) build\bin\*$(EXE) 2>nul
-	-$(RM_F) build\bin\*.dll 2>nul
-	-$(RM_F) build\lib\*.a 2>nul
-	-$(RMDIR) build 2>nul
+	-$(RM_F) "$(OBJ_DIR_WIN)\*.o" 2>nul
+	-$(RM_F) "$(BIN_DIR_WIN)\*$(EXE)" 2>nul
+	-$(RM_F) "$(BIN_DIR_WIN)\*.dll" 2>nul
+	-$(RM_F) "$(LIB_DIR_WIN)\*.a" 2>nul
+	-$(RMDIR) "$(BUILD_ROOT_WIN)" 2>nul
 else
-	-$(RM_F) build/obj/*.o
-	-$(RM_F) build/bin/*
-	-$(RM_F) build/lib/*.a
-	-$(RM_F) build/bin/*.so
-	-$(RMDIR) build
+	-$(RM_F) $(OBJ_DIR)/*.o
+	-$(RM_F) $(BIN_DIR)/*
+	-$(RM_F) $(LIB_DIR)/*.a
+	-$(RM_F) $(BIN_DIR)/*.so
+	-$(RMDIR) $(BUILD_ROOT)
 endif

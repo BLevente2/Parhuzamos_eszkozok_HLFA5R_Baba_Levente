@@ -1,6 +1,0 @@
-This package was updated to default the AES.WinForms project to x86 so it can load 32-bit native DLLs produced by a 32-bit MinGW/OpenCL toolchain.
-
-Important:
-- Native CPU benchmark rows failed previously because the WinForms process was x64 while the native DLLs were x86.
-- OpenCL CBC is still not implemented in the current OpenCL FFI, so selecting CBC will continue to skip/fail the OpenCL benchmark path even after switching to x86.
-- For OpenCL benchmark validation, use CTR or another mode that is actually wired in the native OpenCL layer.

@@ -1,40 +1,56 @@
 ifeq ($(OS),Windows_NT)
 SHELL := cmd.exe
 .SHELLFLAGS := /C
-MKDIR_BUILD := if not exist build mkdir build
-MKDIR_OBJ := if not exist build\obj mkdir build\obj
-MKDIR_BIN := if not exist build\bin mkdir build\bin
-MKDIR_LIB := if not exist build\lib mkdir build\lib
+else
+SHELL := /bin/sh
+.SHELLFLAGS := -c
+endif
+
+BUILD_SUBDIR ?=
+BUILD_ROOT := build$(if $(BUILD_SUBDIR),/$(BUILD_SUBDIR),)
+OBJ_DIR := $(BUILD_ROOT)/obj
+BIN_DIR := $(BUILD_ROOT)/bin
+LIB_DIR := $(BUILD_ROOT)/lib
+BUILD_ROOT_WIN := $(subst /,\,$(BUILD_ROOT))
+OBJ_DIR_WIN := $(subst /,\,$(OBJ_DIR))
+BIN_DIR_WIN := $(subst /,\,$(BIN_DIR))
+LIB_DIR_WIN := $(subst /,\,$(LIB_DIR))
+
+ifeq ($(OS),Windows_NT)
+MKDIR_BUILD := if not exist "$(BUILD_ROOT_WIN)" mkdir "$(BUILD_ROOT_WIN)"
+MKDIR_OBJ := if not exist "$(OBJ_DIR_WIN)" mkdir "$(OBJ_DIR_WIN)"
+MKDIR_BIN := if not exist "$(BIN_DIR_WIN)" mkdir "$(BIN_DIR_WIN)"
+MKDIR_LIB := if not exist "$(LIB_DIR_WIN)" mkdir "$(LIB_DIR_WIN)"
 RM_F := del /Q
 RMDIR := rmdir /S /Q
 EXE := .exe
 SHARED_EXT := .dll
+COPY_KERNELS := if not exist "$(BIN_DIR_WIN)\kernels" mkdir "$(BIN_DIR_WIN)\kernels"
+COPY_KERNELS += & copy /Y kernels\*.cl "$(BIN_DIR_WIN)\kernels" >nul
 else
-MKDIR_BUILD := mkdir -p build
-MKDIR_OBJ := mkdir -p build/obj
-MKDIR_BIN := mkdir -p build/bin
-MKDIR_LIB := mkdir -p build/lib
+MKDIR_BUILD := mkdir -p "$(BUILD_ROOT)"
+MKDIR_OBJ := mkdir -p "$(OBJ_DIR)"
+MKDIR_BIN := mkdir -p "$(BIN_DIR)"
+MKDIR_LIB := mkdir -p "$(LIB_DIR)"
 RM_F := rm -f
 RMDIR := rm -rf
 EXE :=
 SHARED_EXT := .so
+COPY_KERNELS := mkdir -p "$(BIN_DIR)/kernels" && cp -f kernels/*.cl "$(BIN_DIR)/kernels/"
 endif
 
-ifeq ($(OS),Windows_NT)
-COPY_KERNELS := if not exist build\bin\kernels mkdir build\bin\kernels
-COPY_KERNELS += & copy /Y kernels\*.cl build\bin\kernels >nul
-else
-COPY_KERNELS := mkdir -p build/bin/kernels && cp -f kernels/*.cl build/bin/kernels/
-endif
-
+ifeq ($(origin CC),default)
 CC := gcc
-AR := ar
+endif
+AR ?= ar
 
 PROF ?= 0
 FAST ?= 0
+STRICT ?= 0
 
 OPENCL_LIBS ?= -lOpenCL
-OPENCL_CFLAGS ?=
+OPENCL_TARGET_VERSION ?= 120
+OPENCL_CFLAGS ?= -DCL_TARGET_OPENCL_VERSION=$(OPENCL_TARGET_VERSION)
 
 AESLIB_DIR := ../aeslib
 KERNEL_LOADER_DIR := ../kernel_loader
@@ -42,7 +58,12 @@ KERNEL_LOADER_DIR := ../kernel_loader
 CFLAGS_BASE := -std=c99 -O2 -Wall -Wextra -Iinclude -I$(AESLIB_DIR)/include -I$(KERNEL_LOADER_DIR)/include $(OPENCL_CFLAGS) -DCRYPTO_OPENCL_BUILD_DLL
 
 ifeq ($(FAST),1)
-CFLAGS_BASE := -std=c99 -O3 -march=native -fomit-frame-pointer -funroll-loops -Wall -Wextra -Iinclude -I$(AESLIB_DIR)/include -I$(KERNEL_LOADER_DIR)/include $(OPENCL_CFLAGS) -DCRYPTO_OPENCL_BUILD_DLL
+MARCH ?= native
+CFLAGS_BASE := -std=c99 -O3 -march=$(MARCH) -fomit-frame-pointer -funroll-loops -Wall -Wextra -Iinclude -I$(AESLIB_DIR)/include -I$(KERNEL_LOADER_DIR)/include $(OPENCL_CFLAGS) -DCRYPTO_OPENCL_BUILD_DLL
+endif
+
+ifeq ($(STRICT),1)
+CFLAGS_BASE += -Wpedantic -Wconversion -Wshadow -Wstrict-prototypes
 endif
 
 LDFLAGS :=
@@ -60,43 +81,46 @@ endif
 CFLAGS := $(CFLAGS_BASE) $(PIC)
 
 ifeq ($(OS),Windows_NT)
-DEPS_LD_DIRS := -L$(AESLIB_DIR)/build/lib -L$(KERNEL_LOADER_DIR)/build/lib
+DEPS_LD_DIRS := -L$(AESLIB_DIR)/build$(if $(BUILD_SUBDIR),/$(BUILD_SUBDIR))/lib -L$(KERNEL_LOADER_DIR)/build$(if $(BUILD_SUBDIR),/$(BUILD_SUBDIR))/lib
 DEPS_LD_LIBS := -lcrypto_aes -lkernel_loader
-AESLIB_DLL := ..\aeslib\build\bin\crypto_aes$(SHARED_EXT)
-KERNEL_LOADER_DLL := ..\kernel_loader\build\bin\kernel_loader$(SHARED_EXT)
+AESLIB_DLL := $(AESLIB_DIR)/build$(if $(BUILD_SUBDIR),/$(BUILD_SUBDIR))/bin/crypto_aes$(SHARED_EXT)
+KERNEL_LOADER_DLL := $(KERNEL_LOADER_DIR)/build$(if $(BUILD_SUBDIR),/$(BUILD_SUBDIR))/bin/kernel_loader$(SHARED_EXT)
+AESLIB_DLL_WIN := $(subst /,\,$(AESLIB_DLL))
+KERNEL_LOADER_DLL_WIN := $(subst /,\,$(KERNEL_LOADER_DLL))
+IMPORT_LIB_WIN := $(subst /,\,$(LIB_DIR)/libcrypto_aes_opencl.dll.a)
 RPATH_LDFLAGS :=
 else
-DEPS_LD_DIRS := -L$(AESLIB_DIR)/build/bin -L$(KERNEL_LOADER_DIR)/build/bin
+DEPS_LD_DIRS := -L$(AESLIB_DIR)/build$(if $(BUILD_SUBDIR),/$(BUILD_SUBDIR))/bin -L$(KERNEL_LOADER_DIR)/build$(if $(BUILD_SUBDIR),/$(BUILD_SUBDIR))/bin
 DEPS_LD_LIBS := -lcrypto_aes -lkernel_loader
-AESLIB_DLL := $(AESLIB_DIR)/build/bin/libcrypto_aes$(SHARED_EXT)
-KERNEL_LOADER_DLL := $(KERNEL_LOADER_DIR)/build/bin/libkernel_loader$(SHARED_EXT)
+AESLIB_DLL := $(AESLIB_DIR)/build$(if $(BUILD_SUBDIR),/$(BUILD_SUBDIR))/bin/libcrypto_aes$(SHARED_EXT)
+KERNEL_LOADER_DLL := $(KERNEL_LOADER_DIR)/build$(if $(BUILD_SUBDIR),/$(BUILD_SUBDIR))/bin/libkernel_loader$(SHARED_EXT)
 RPATH_LDFLAGS := -Wl,-rpath,'$$ORIGIN'
 endif
 
 DEPS_LDFLAGS := $(DEPS_LD_DIRS) $(DEPS_LD_LIBS) $(RPATH_LDFLAGS)
 
 SRC := src/opencl_aes_ctr.c src/crypto_ffi_opencl.c src/crypto_ocl_profile.c
-OBJ := build/obj/opencl_aes_ctr.o build/obj/crypto_ffi_opencl.o build/obj/crypto_ocl_profile.o
+OBJ := $(OBJ_DIR)/opencl_aes_ctr.o $(OBJ_DIR)/crypto_ffi_opencl.o $(OBJ_DIR)/crypto_ocl_profile.o
 
-LIB_STATIC := build/lib/libcrypto_aes_opencl.a
+LIB_STATIC := $(LIB_DIR)/libcrypto_aes_opencl.a
 
 TEST_SRC := tests/test_opencl_aes.c
-TEST_OBJ := build/obj/test_opencl_aes.o
-TEST_BIN := build/bin/test_opencl_aes$(EXE)
+TEST_OBJ := $(OBJ_DIR)/test_opencl_aes.o
+TEST_BIN := $(BIN_DIR)/test_opencl_aes$(EXE)
 
 BENCH_SRC := tests/bench_opencl_aes.c
-BENCH_OBJ := build/obj/bench_opencl_aes.o
-BENCH_BIN := build/bin/bench_opencl_aes$(EXE)
+BENCH_OBJ := $(OBJ_DIR)/bench_opencl_aes.o
+BENCH_BIN := $(BIN_DIR)/bench_opencl_aes$(EXE)
 
 PROFILE_SRC := tests/profile_opencl_aes.c
-PROFILE_OBJ := build/obj/profile_opencl_aes.o
-PROFILE_BIN := build/bin/profile_opencl_aes$(EXE)
+PROFILE_OBJ := $(OBJ_DIR)/profile_opencl_aes.o
+PROFILE_BIN := $(BIN_DIR)/profile_opencl_aes$(EXE)
 
 ifeq ($(OS),Windows_NT)
-SHARED_LIB := build/bin/crypto_aes_opencl$(SHARED_EXT)
-IMPORT_LIB := build/lib/libcrypto_aes_opencl.dll.a
+SHARED_LIB := $(BIN_DIR)/crypto_aes_opencl$(SHARED_EXT)
+IMPORT_LIB := $(LIB_DIR)/libcrypto_aes_opencl.dll.a
 else
-SHARED_LIB := build/bin/libcrypto_aes_opencl$(SHARED_EXT)
+SHARED_LIB := $(BIN_DIR)/libcrypto_aes_opencl$(SHARED_EXT)
 IMPORT_LIB :=
 endif
 
@@ -111,35 +135,35 @@ PROFILE_TARGET :=
 endif
 
 all:
-	$(MAKE) deps
-	$(MAKE) lib
-	$(MAKE) shared
-	$(MAKE) test
-	$(MAKE) bench
+	$(MAKE) deps BUILD_SUBDIR=$(BUILD_SUBDIR) CC=$(CC) AR=$(AR)
+	$(MAKE) lib BUILD_SUBDIR=$(BUILD_SUBDIR) CC=$(CC) AR=$(AR)
+	$(MAKE) shared BUILD_SUBDIR=$(BUILD_SUBDIR) CC=$(CC) AR=$(AR)
+	$(MAKE) test BUILD_SUBDIR=$(BUILD_SUBDIR) CC=$(CC) AR=$(AR)
+	$(MAKE) bench BUILD_SUBDIR=$(BUILD_SUBDIR) CC=$(CC) AR=$(AR)
 ifeq ($(PROF),1)
-	$(MAKE) profile
+	$(MAKE) profile BUILD_SUBDIR=$(BUILD_SUBDIR) CC=$(CC) AR=$(AR)
 endif
-	$(MAKE) copy_kernels
-	$(MAKE) copy_deps
+	$(MAKE) copy_kernels BUILD_SUBDIR=$(BUILD_SUBDIR) CC=$(CC) AR=$(AR)
+	$(MAKE) copy_deps BUILD_SUBDIR=$(BUILD_SUBDIR) CC=$(CC) AR=$(AR)
 
 deps:
-	$(MAKE) -C $(AESLIB_DIR) shared
-	$(MAKE) -C $(KERNEL_LOADER_DIR) all
+	$(MAKE) -C $(AESLIB_DIR) shared BUILD_SUBDIR=$(BUILD_SUBDIR) CC=$(CC) AR=$(AR)
+	$(MAKE) -C $(KERNEL_LOADER_DIR) all BUILD_SUBDIR=$(BUILD_SUBDIR) CC=$(CC) AR=$(AR) OPENCL_CFLAGS="$(OPENCL_CFLAGS)" OPENCL_LIBS="$(OPENCL_LIBS)"
 
 copy_deps: deps build_dirs
 
 ifeq ($(OS),Windows_NT)
-	if not exist build\bin mkdir build\bin
-	if not exist $(AESLIB_DLL) (echo Missing dependency: $(AESLIB_DLL) & exit /b 1)
-	if not exist $(KERNEL_LOADER_DLL) (echo Missing dependency: $(KERNEL_LOADER_DLL) & exit /b 1)
-	copy /Y $(AESLIB_DLL) build\bin\ >nul || exit /b 1
-	copy /Y $(KERNEL_LOADER_DLL) build\bin\ >nul || exit /b 1
+	if not exist "$(BIN_DIR_WIN)" mkdir "$(BIN_DIR_WIN)"
+	if not exist "$(AESLIB_DLL_WIN)" (echo Missing dependency: $(AESLIB_DLL_WIN) & exit /b 1)
+	if not exist "$(KERNEL_LOADER_DLL_WIN)" (echo Missing dependency: $(KERNEL_LOADER_DLL_WIN) & exit /b 1)
+	copy /Y "$(AESLIB_DLL_WIN)" "$(BIN_DIR_WIN)\" >nul || exit /b 1
+	copy /Y "$(KERNEL_LOADER_DLL_WIN)" "$(BIN_DIR_WIN)\" >nul || exit /b 1
 else
 	test -f $(AESLIB_DLL) || (echo "Missing dependency: $(AESLIB_DLL)"; exit 1)
 	test -f $(KERNEL_LOADER_DLL) || (echo "Missing dependency: $(KERNEL_LOADER_DLL)"; exit 1)
-	mkdir -p build/bin
-	cp -f $(AESLIB_DLL) build/bin/
-	cp -f $(KERNEL_LOADER_DLL) build/bin/
+	mkdir -p "$(BIN_DIR)"
+	cp -f $(AESLIB_DLL) "$(BIN_DIR)/"
+	cp -f $(KERNEL_LOADER_DLL) "$(BIN_DIR)/"
 endif
 
 build_dirs:
@@ -164,7 +188,7 @@ profile: deps $(PROFILE_BIN) copy_kernels copy_deps
 $(LIB_STATIC): build_dirs $(OBJ)
 	$(AR) rcs $(LIB_STATIC) $(OBJ)
 
-build/obj/%.o: src/%.c build_dirs
+$(OBJ_DIR)/%.o: src/%.c build_dirs
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(TEST_OBJ): $(TEST_SRC) build_dirs
@@ -187,7 +211,7 @@ $(PROFILE_BIN): build_dirs $(LIB_STATIC) $(PROFILE_OBJ)
 
 ifeq ($(OS),Windows_NT)
 $(SHARED_LIB): build_dirs $(OBJ)
-	$(CC) -shared -o $(SHARED_LIB) $(OBJ) -Wl,--out-implib,$(IMPORT_LIB) -Wl,--export-all-symbols $(LDFLAGS) $(OPENCL_LIBS) $(DEPS_LDFLAGS)
+	$(CC) -shared -o $(SHARED_LIB) $(OBJ) -Wl,--out-implib,$(IMPORT_LIB_WIN) -Wl,--export-all-symbols $(LDFLAGS) $(OPENCL_LIBS) $(DEPS_LDFLAGS)
 else
 $(SHARED_LIB): build_dirs $(OBJ)
 	$(CC) -shared -o $(SHARED_LIB) $(OBJ) $(LDFLAGS) $(OPENCL_LIBS) $(DEPS_LDFLAGS)
@@ -195,15 +219,15 @@ endif
 
 clean:
 ifeq ($(OS),Windows_NT)
-	-$(RM_F) build\obj\*.o 2>nul
-	-$(RM_F) build\bin\*$(EXE) 2>nul
-	-$(RM_F) build\bin\*.dll 2>nul
-	-$(RM_F) build\lib\*.a 2>nul
-	-$(RMDIR) build 2>nul
+	-$(RM_F) "$(OBJ_DIR_WIN)\*.o" 2>nul
+	-$(RM_F) "$(BIN_DIR_WIN)\*$(EXE)" 2>nul
+	-$(RM_F) "$(BIN_DIR_WIN)\*.dll" 2>nul
+	-$(RM_F) "$(LIB_DIR_WIN)\*.a" 2>nul
+	-$(RMDIR) "$(BUILD_ROOT_WIN)" 2>nul
 else
-	-$(RM_F) build/obj/*.o
-	-$(RM_F) build/bin/*
-	-$(RM_F) build/lib/*.a
-	-$(RM_F) build/bin/*.so
-	-$(RMDIR) build
+	-$(RM_F) $(OBJ_DIR)/*.o
+	-$(RM_F) $(BIN_DIR)/*
+	-$(RM_F) $(LIB_DIR)/*.a
+	-$(RM_F) $(BIN_DIR)/*.so
+	-$(RMDIR) $(BUILD_ROOT)
 endif

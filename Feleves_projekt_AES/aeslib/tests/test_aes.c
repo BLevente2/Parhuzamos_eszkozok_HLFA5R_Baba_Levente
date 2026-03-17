@@ -452,7 +452,7 @@ static int test_gcm_vectors(void)
             iv2[i] = (uint8_t)(0xa0 + i);
         }
         for (int i = 0; i < 37; i++) {
-            aad2[i] = (uint8_t)(i * 3u + 7u);
+            aad2[i] = (uint8_t)(((unsigned)i * 3u) + 7u);
         }
         for (int i = 0; i < 103; i++) {
             pt2[i] = (uint8_t)(i ^ (i >> 2));
@@ -494,7 +494,7 @@ static int test_gcm_vectors(void)
             iv2[i] = (uint8_t)(0xb0 + i);
         }
         for (int i = 0; i < 37; i++) {
-            aad2[i] = (uint8_t)(i * 5u + 1u);
+            aad2[i] = (uint8_t)(((unsigned)i * 5u) + 1u);
         }
         for (int i = 0; i < 103; i++) {
             pt2[i] = (uint8_t)(i ^ (i >> 1));
