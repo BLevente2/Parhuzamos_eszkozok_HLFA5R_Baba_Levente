@@ -23,7 +23,7 @@
 
   <Target Name="BuildNativeDependencies" BeforeTargets="Build" Condition="$([MSBuild]::IsOSPlatform('Windows'))">
     <Message Text="Building native AES dependencies for $(PlatformTarget)..." Importance="high" />
-    <Exec WorkingDirectory="$(MSBuildProjectDirectory)" Command="&quot;$(NativeBuildScript)&quot; $(PlatformTarget) &quot;$(OpenClProjectDir)&quot;" ContinueOnError="false" />
+    <Exec WorkingDirectory="$(MSBuildProjectDirectory)" Command="&quot;$(NativeBuildScript)&quot; $(PlatformTarget) &quot;$(OpenClProjectDir)&quot;" ContinueOnError="false" StandardOutputImportance="high" StandardErrorImportance="high" />
   </Target>
 
   <Target Name="CopyNativeDependencies" AfterTargets="Build" Condition="$([MSBuild]::IsOSPlatform('Windows'))">
