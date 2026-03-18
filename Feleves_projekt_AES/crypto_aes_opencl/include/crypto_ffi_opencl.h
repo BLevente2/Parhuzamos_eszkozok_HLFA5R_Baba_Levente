@@ -83,6 +83,26 @@ CRYPTO_OPENCL_API crypto_status_t crypto_ffi_opencl_aes_gcm_decrypt_alloc(const 
                                                                           uint8_t** plaintext_out,
                                                                           size_t* plaintext_len_out);
 
+CRYPTO_OPENCL_API crypto_status_t crypto_ffi_opencl_aes_gcm_encrypt_file(const uint8_t* key,
+                                                                         size_t key_len_bytes,
+                                                                         const uint8_t* iv,
+                                                                         size_t iv_len,
+                                                                         const uint8_t* aad,
+                                                                         size_t aad_len,
+                                                                         const char* input_path,
+                                                                         const char* output_path,
+                                                                         uint8_t tag16_out[16]);
+
+CRYPTO_OPENCL_API crypto_status_t crypto_ffi_opencl_aes_gcm_decrypt_file(const uint8_t* key,
+                                                                         size_t key_len_bytes,
+                                                                         const uint8_t* iv,
+                                                                         size_t iv_len,
+                                                                         const uint8_t* aad,
+                                                                         size_t aad_len,
+                                                                         const char* input_path,
+                                                                         const char* output_path,
+                                                                         const uint8_t tag16[16]);
+
 CRYPTO_OPENCL_API void crypto_ffi_opencl_free(void* p);
 
 #ifdef __cplusplus

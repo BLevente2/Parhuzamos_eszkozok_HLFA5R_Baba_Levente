@@ -12,10 +12,12 @@ public sealed class Form1 : Form
     private readonly ManagedCryptoService _managedCryptoService = new();
     private readonly NativeCryptoFacade _nativeCryptoFacade = new();
     private readonly BenchmarkCsvService _benchmarkCsvService = new();
+    private readonly SingleFileCryptoService _singleFileCryptoService;
     private readonly BenchmarkService _benchmarkService;
     private readonly EnvironmentInspectionService _environmentInspectionService;
 
     private BenchmarkSession? _currentBenchmarkSession;
+    private SingleFilePackageInfo? _currentSingleFilePackageInfo;
     private CancellationTokenSource? _benchmarkCancellationTokenSource;
 
     private readonly TabControl _tabControl = new() { Dock = DockStyle.Fill };
@@ -36,10 +38,25 @@ public sealed class Form1 : Form
     private readonly DataGridView _benchmarkDetailsGrid = CreateGrid();
     private readonly BenchmarkChartControl _benchmarkChart = new() { Dock = DockStyle.Fill };
     private readonly TextBox _benchmarkNotesTextBox = new() { Dock = DockStyle.Fill, ReadOnly = true, Multiline = true, ScrollBars = ScrollBars.Vertical };
+    private readonly ComboBox _singleFileOperationComboBox = CreateDropDown();
+    private readonly ComboBox _singleFileEngineComboBox = CreateDropDown();
+    private readonly ComboBox _singleFileAlgorithmComboBox = CreateDropDown();
+    private readonly ComboBox _singleFilePaddingComboBox = CreateDropDown();
+    private readonly ComboBox _singleFileKeySizeComboBox = CreateDropDown();
+    private readonly TextBox _singleFilePasswordTextBox = new() { Dock = DockStyle.Fill, UseSystemPasswordChar = true, PlaceholderText = "Password" };
+    private readonly TextBox _singleFileInputPathTextBox = new() { Dock = DockStyle.Fill, PlaceholderText = "Input file" };
+    private readonly TextBox _singleFileOutputPathTextBox = new() { Dock = DockStyle.Fill, PlaceholderText = "Output file" };
+    private readonly Button _singleFileBrowseInputButton = new() { Text = "Browse input...", AutoSize = true };
+    private readonly Button _singleFileBrowseOutputButton = new() { Text = "Browse output...", AutoSize = true };
+    private readonly Button _singleFileRunButton = new() { Text = "Run", AutoSize = true };
+    private readonly ProgressBar _singleFileProgressBar = new() { Dock = DockStyle.Fill, Visible = false, Style = ProgressBarStyle.Marquee, MarqueeAnimationSpeed = 30, Height = 22 };
+    private readonly Label _singleFileStatusLabel = new() { Dock = DockStyle.Fill, AutoEllipsis = true, Text = "Ready." };
+    private readonly TextBox _singleFileInfoTextBox = new() { Dock = DockStyle.Top, Multiline = true, ReadOnly = true, BackColor = Color.White, BorderStyle = BorderStyle.FixedSingle, ScrollBars = ScrollBars.Vertical, Height = 180 };
     private readonly TextBox _diagnosticsTextBox = new() { Dock = DockStyle.Fill, Multiline = true, ScrollBars = ScrollBars.Both, ReadOnly = true, Font = new Font("Consolas", 9f) };
 
     public Form1()
     {
+        _singleFileCryptoService = new SingleFileCryptoService(_passwordDerivationService, _nativeCryptoFacade);
         _benchmarkService = new BenchmarkService(_passwordDerivationService, _managedCryptoService, _nativeCryptoFacade);
         _environmentInspectionService = new EnvironmentInspectionService(_nativeCryptoFacade);
         InitializeComponent();
@@ -81,60 +98,328 @@ public sealed class Form1 : Form
 
         root.Controls.Add(CreateHeaderLabel("Single-file encryption and decryption"), 0, 0);
 
+        _singleFileOperationComboBox.Items.AddRange(new object[] { "Encrypt", "Decrypt" });
+        _singleFileOperationComboBox.SelectedIndex = 0;
+
+        _singleFileEngineComboBox.Items.AddRange(new object[] { "Native CPU", "OpenCL" });
+        _singleFileEngineComboBox.SelectedIndex = 0;
+
+        _singleFileAlgorithmComboBox.DataSource = Enum.GetValues<CryptoAlgorithm>();
+        _singleFilePaddingComboBox.DataSource = Enum.GetValues<CryptoPaddingMode>();
+        _singleFileKeySizeComboBox.Items.AddRange(new object[] { "128", "192", "256" });
+        _singleFileKeySizeComboBox.SelectedIndex = 2;
+        _singleFilePasswordTextBox.Text = "demo-password";
+        _singleFileAlgorithmComboBox.SelectedItem = CryptoAlgorithm.Ctr;
+        _singleFilePaddingComboBox.SelectedItem = CryptoPaddingMode.Pkcs7;
+
+        _singleFileOperationComboBox.SelectedIndexChanged += (_, _) => SyncSingleFileState();
+        _singleFileEngineComboBox.SelectedIndexChanged += (_, _) => SyncSingleFileState();
+        _singleFileAlgorithmComboBox.SelectedIndexChanged += (_, _) => SyncSingleFileState();
+        _singleFileBrowseInputButton.Click += OnSingleFileBrowseInputClick;
+        _singleFileBrowseOutputButton.Click += OnSingleFileBrowseOutputClick;
+        _singleFileRunButton.Click += async (_, _) => await RunSingleFileAsync();
+        _singleFileInputPathTextBox.TextChanged += (_, _) =>
+        {
+            if (GetSingleFileOperationIsEncrypt())
+            {
+                _currentSingleFilePackageInfo = null;
+                RefreshSingleFileInfo();
+            }
+            else
+            {
+                InspectSingleFilePackage();
+                RefreshSingleFileInfo();
+            }
+        };
+
         var form = CreateResponsiveFieldTable(2);
+        AddLabeledControl(form, 0, 0, "Operation", _singleFileOperationComboBox);
+        AddLabeledControl(form, 1, 0, "Engine", _singleFileEngineComboBox);
+        AddLabeledControl(form, 0, 1, "Algorithm", _singleFileAlgorithmComboBox);
+        AddLabeledControl(form, 1, 1, "Padding", _singleFilePaddingComboBox);
+        AddLabeledControl(form, 0, 2, "Key size (bits)", _singleFileKeySizeComboBox);
+        AddLabeledControl(form, 1, 2, "Password", _singleFilePasswordTextBox);
+        AddLabeledControl(form, 0, 3, "Input file", _singleFileInputPathTextBox);
+        AddLabeledControl(form, 1, 3, "Output file", _singleFileOutputPathTextBox);
 
-        var operationCombo = CreateDropDown();
-        operationCombo.Items.AddRange(new object[] { "Encrypt", "Decrypt" });
-        operationCombo.SelectedIndex = 0;
+        var buttonPanel = CreateButtonPanel();
+        buttonPanel.Controls.AddRange(new Control[] { _singleFileBrowseInputButton, _singleFileBrowseOutputButton, _singleFileRunButton });
 
-        var engineCombo = CreateDropDown();
-        engineCombo.Items.AddRange(new object[] { "Native CPU", "OpenCL" });
-        engineCombo.SelectedIndex = 0;
-
-        var algorithmCombo = CreateDropDown();
-        algorithmCombo.Items.AddRange(new object[] { "CBC", "CTR", "GCM" });
-        algorithmCombo.SelectedIndex = 1;
-
-        var paddingCombo = CreateDropDown();
-        paddingCombo.Items.AddRange(new object[] { "PKCS7", "ANSI X9.23", "ISO 7816-4", "Zero", "None" });
-        paddingCombo.SelectedIndex = 0;
-
-        var keyCombo = CreateDropDown();
-        keyCombo.Items.AddRange(new object[] { "128", "192", "256" });
-        keyCombo.SelectedIndex = 2;
-
-        var passwordTextBox = new TextBox { Dock = DockStyle.Fill, UseSystemPasswordChar = true, PlaceholderText = "Password" };
-        var inputPathTextBox = new TextBox { Dock = DockStyle.Fill, PlaceholderText = "Input file" };
-        var outputPathTextBox = new TextBox { Dock = DockStyle.Fill, PlaceholderText = "Output file (.aes by default)" };
-        var browseInputButton = new Button { Text = "Browse input...", AutoSize = true };
-        var browseOutputButton = new Button { Text = "Browse output...", AutoSize = true };
-        var runButton = new Button { Text = "Run", AutoSize = true };
-
-        browseInputButton.Click += (_, _) => MessageBox.Show(this, "The final single-file implementation will be wired in the next phase. The benchmark tab is already functional.", "Work in progress", MessageBoxButtons.OK, MessageBoxIcon.Information);
-        browseOutputButton.Click += (_, _) => MessageBox.Show(this, "The final single-file implementation will be wired in the next phase. The benchmark tab is already functional.", "Work in progress", MessageBoxButtons.OK, MessageBoxIcon.Information);
-        runButton.Click += (_, _) => MessageBox.Show(this, "This tab is scaffolded and ready for the next implementation phase. The benchmark tab is the fully implemented milestone in this revision.", "Work in progress", MessageBoxButtons.OK, MessageBoxIcon.Information);
-
-        AddLabeledControl(form, 0, 0, "Operation", operationCombo);
-        AddLabeledControl(form, 1, 0, "Engine", engineCombo);
-        AddLabeledControl(form, 0, 1, "Algorithm", algorithmCombo);
-        AddLabeledControl(form, 1, 1, "Padding", paddingCombo);
-        AddLabeledControl(form, 0, 2, "Key size (bits)", keyCombo);
-        AddLabeledControl(form, 1, 2, "Password", passwordTextBox);
-        AddLabeledControl(form, 0, 3, "Input file", inputPathTextBox);
-        AddLabeledControl(form, 1, 3, "Output file", outputPathTextBox);
-
-        var buttonsPanel = CreateButtonPanel();
-        buttonsPanel.Controls.AddRange(new Control[] { browseInputButton, browseOutputButton, runButton });
-
-        var infoBox = CreateInfoTextBox("This tab already contains the UI structure for file mode, but the actual file pipeline, metadata header format, and streamed native file processing are scheduled for the next implementation phase.");
-        infoBox.Height = 160;
+        var statusPanel = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = 2,
+            Margin = new Padding(0, 0, 0, 8)
+        };
+        statusPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 240f));
+        statusPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+        statusPanel.Controls.Add(_singleFileProgressBar, 0, 0);
+        statusPanel.Controls.Add(_singleFileStatusLabel, 1, 0);
 
         root.Controls.Add(form, 0, 1);
-        root.Controls.Add(buttonsPanel, 0, 2);
-        root.Controls.Add(infoBox, 0, 3);
+        root.Controls.Add(buttonPanel, 0, 2);
+        root.Controls.Add(statusPanel, 0, 3);
+        root.Controls.Add(_singleFileInfoTextBox, 0, 4);
 
         page.Controls.Add(CreateScrollableHost(root));
         _tabControl.TabPages.Add(page);
+
+        SyncSingleFileState();
+        RefreshSingleFileInfo();
+    }
+
+    private async Task RunSingleFileAsync()
+    {
+        try
+        {
+            var request = BuildSingleFileRequest();
+            ToggleSingleFileUi(isRunning: true);
+            _singleFileStatusLabel.Text = request.Encrypt ? "Encrypting file..." : "Decrypting file...";
+            var message = await _singleFileCryptoService.ExecuteAsync(request);
+            _singleFileStatusLabel.Text = message;
+            if (!request.Encrypt)
+            {
+                var packageResult = _singleFileCryptoService.TryReadPackage(request.InputPath);
+                _currentSingleFilePackageInfo = packageResult.Succeeded ? packageResult.Value : null;
+            }
+        }
+        catch (Exception ex)
+        {
+            _singleFileStatusLabel.Text = "Single-file operation failed.";
+            MessageBox.Show(this, ex.Message, "Single-file error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            ToggleSingleFileUi(isRunning: false);
+            RefreshDiagnostics();
+            RefreshSingleFileInfo();
+        }
+    }
+
+    private SingleFileRequest BuildSingleFileRequest()
+    {
+        var encrypt = GetSingleFileOperationIsEncrypt();
+        var packageInfo = encrypt ? null : GetSelectedSingleFilePackageOrThrow();
+        var algorithm = encrypt ? GetSelectedSingleFileAlgorithm() : packageInfo!.Algorithm;
+        var padding = encrypt
+            ? (algorithm == CryptoAlgorithm.Gcm ? CryptoPaddingMode.None : GetSelectedSingleFilePadding())
+            : packageInfo!.Padding;
+        var keySizeBits = encrypt
+            ? int.Parse(_singleFileKeySizeComboBox.SelectedItem?.ToString() ?? "256", CultureInfo.InvariantCulture)
+            : packageInfo!.KeySizeBits;
+
+        return new SingleFileRequest
+        {
+            Encrypt = encrypt,
+            Engine = GetSelectedSingleFileEngine(),
+            Algorithm = algorithm,
+            Padding = padding,
+            KeySizeBits = keySizeBits,
+            Password = _singleFilePasswordTextBox.Text,
+            InputPath = _singleFileInputPathTextBox.Text.Trim(),
+            OutputPath = _singleFileOutputPathTextBox.Text.Trim()
+        };
+    }
+
+    private void OnSingleFileBrowseInputClick(object? sender, EventArgs e)
+    {
+        using var dialog = new OpenFileDialog
+        {
+            Filter = GetSingleFileOperationIsEncrypt()
+                ? "All files (*.*)|*.*"
+                : "AES package files (*.aes)|*.aes|All files (*.*)|*.*",
+            Multiselect = false
+        };
+
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+        {
+            return;
+        }
+
+        _singleFileInputPathTextBox.Text = dialog.FileName;
+        if (string.IsNullOrWhiteSpace(_singleFileOutputPathTextBox.Text))
+        {
+            _singleFileOutputPathTextBox.Text = BuildDefaultSingleFileOutputPath(dialog.FileName, GetSingleFileOperationIsEncrypt());
+        }
+
+        InspectSingleFilePackage();
+    }
+
+    private void OnSingleFileBrowseOutputClick(object? sender, EventArgs e)
+    {
+        using var dialog = new SaveFileDialog
+        {
+            Filter = GetSingleFileOperationIsEncrypt()
+                ? "AES package files (*.aes)|*.aes|All files (*.*)|*.*"
+                : "All files (*.*)|*.*",
+            DefaultExt = GetSingleFileOperationIsEncrypt() ? "aes" : string.Empty,
+            FileName = BuildDefaultSingleFileOutputPath(_singleFileInputPathTextBox.Text.Trim(), GetSingleFileOperationIsEncrypt())
+        };
+
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+        {
+            return;
+        }
+
+        _singleFileOutputPathTextBox.Text = dialog.FileName;
+    }
+
+    private void SyncSingleFileState()
+    {
+        var encrypt = GetSingleFileOperationIsEncrypt();
+        var selectedAlgorithm = GetSelectedSingleFileAlgorithm();
+        var packageAlgorithm = _currentSingleFilePackageInfo?.Algorithm;
+        var effectiveAlgorithm = encrypt ? selectedAlgorithm : packageAlgorithm ?? selectedAlgorithm;
+        var disablePadding = effectiveAlgorithm == CryptoAlgorithm.Gcm;
+
+        if (encrypt)
+        {
+            _currentSingleFilePackageInfo = null;
+        }
+
+        _singleFileAlgorithmComboBox.Enabled = encrypt;
+        _singleFilePaddingComboBox.Enabled = encrypt && !disablePadding;
+        _singleFileKeySizeComboBox.Enabled = encrypt;
+        if (disablePadding)
+        {
+            _singleFilePaddingComboBox.SelectedItem = CryptoPaddingMode.None;
+        }
+
+        if (!encrypt)
+        {
+            InspectSingleFilePackage();
+        }
+
+        RefreshSingleFileInfo();
+    }
+
+    private void InspectSingleFilePackage()
+    {
+        _currentSingleFilePackageInfo = null;
+        if (GetSingleFileOperationIsEncrypt())
+        {
+            return;
+        }
+
+        var path = _singleFileInputPathTextBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+        {
+            return;
+        }
+
+        var result = _singleFileCryptoService.TryReadPackage(path);
+        if (!result.Succeeded || result.Value is null)
+        {
+            _singleFileStatusLabel.Text = result.Message;
+            return;
+        }
+
+        _currentSingleFilePackageInfo = result.Value;
+        _singleFileAlgorithmComboBox.SelectedItem = result.Value.Algorithm;
+        _singleFilePaddingComboBox.SelectedItem = result.Value.Padding;
+        _singleFileKeySizeComboBox.SelectedItem = result.Value.KeySizeBits.ToString(CultureInfo.InvariantCulture);
+        _singleFileStatusLabel.Text = $"Loaded package metadata: {result.Value.Algorithm}, {result.Value.KeySizeBits}-bit key.";
+    }
+
+    private void RefreshSingleFileInfo()
+    {
+        var lines = new List<string>
+        {
+            "Single-file mode uses the same native CPU and OpenCL backends as the benchmark tab.",
+            "Encrypt mode stores a small metadata header before the ciphertext so decrypt mode can restore the algorithm, padding, salt, IV, and GCM tag automatically.",
+            "Decrypt mode uses the package metadata from the input file. Only the selected engine, password, and output path matter there.",
+            "CBC and CTR use the native file pipeline when available. GCM falls back to native buffer processing because the native projects expose GCM only as an in-memory API.",
+            string.Empty
+        };
+
+        if (_currentSingleFilePackageInfo is not null)
+        {
+            lines.Add("Loaded package metadata:");
+            lines.Add($"Algorithm: {_currentSingleFilePackageInfo.Algorithm}");
+            lines.Add($"Padding: {_currentSingleFilePackageInfo.Padding}");
+            lines.Add($"Key size: {_currentSingleFilePackageInfo.KeySizeBits} bits");
+            lines.Add($"PBKDF2 iterations: {_currentSingleFilePackageInfo.IterationCount}");
+            lines.Add($"IV length: {_currentSingleFilePackageInfo.Iv.Length} bytes");
+            lines.Add($"Tag length: {_currentSingleFilePackageInfo.Tag.Length} bytes");
+            lines.Add($"Encrypted payload: {_currentSingleFilePackageInfo.PayloadLength:N0} bytes");
+        }
+        else
+        {
+            lines.Add("No encrypted package metadata is currently loaded.");
+        }
+
+        var engine = GetSelectedSingleFileEngine();
+        var algorithm = _currentSingleFilePackageInfo?.Algorithm ?? GetSelectedSingleFileAlgorithm();
+        if (!_nativeCryptoFacade.IsSupported(engine, algorithm))
+        {
+            lines.Add(string.Empty);
+            lines.Add($"The currently selected engine does not support {algorithm}. Switch the engine before running the operation.");
+        }
+
+        _singleFileInfoTextBox.Text = string.Join(Environment.NewLine, lines);
+    }
+
+    private void ToggleSingleFileUi(bool isRunning)
+    {
+        _singleFileRunButton.Enabled = !isRunning;
+        _singleFileBrowseInputButton.Enabled = !isRunning;
+        _singleFileBrowseOutputButton.Enabled = !isRunning;
+        _singleFileOperationComboBox.Enabled = !isRunning;
+        _singleFileEngineComboBox.Enabled = !isRunning;
+        _singleFileAlgorithmComboBox.Enabled = !isRunning && GetSingleFileOperationIsEncrypt();
+        _singleFilePaddingComboBox.Enabled = !isRunning && GetSingleFileOperationIsEncrypt() && GetSelectedSingleFileAlgorithm() != CryptoAlgorithm.Gcm;
+        _singleFileKeySizeComboBox.Enabled = !isRunning && GetSingleFileOperationIsEncrypt();
+        _singleFilePasswordTextBox.Enabled = !isRunning;
+        _singleFileInputPathTextBox.Enabled = !isRunning;
+        _singleFileOutputPathTextBox.Enabled = !isRunning;
+        _singleFileProgressBar.Visible = isRunning;
+    }
+
+    private bool GetSingleFileOperationIsEncrypt()
+    {
+        return string.Equals(_singleFileOperationComboBox.SelectedItem?.ToString(), "Encrypt", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private CryptoEngine GetSelectedSingleFileEngine()
+    {
+        return string.Equals(_singleFileEngineComboBox.SelectedItem?.ToString(), "OpenCL", StringComparison.OrdinalIgnoreCase)
+            ? CryptoEngine.OpenCl
+            : CryptoEngine.NativeCpu;
+    }
+
+    private CryptoAlgorithm GetSelectedSingleFileAlgorithm()
+    {
+        return _singleFileAlgorithmComboBox.SelectedItem is CryptoAlgorithm algorithm ? algorithm : CryptoAlgorithm.Ctr;
+    }
+
+    private CryptoPaddingMode GetSelectedSingleFilePadding()
+    {
+        return _singleFilePaddingComboBox.SelectedItem is CryptoPaddingMode padding ? padding : CryptoPaddingMode.Pkcs7;
+    }
+
+    private SingleFilePackageInfo GetSelectedSingleFilePackageOrThrow()
+    {
+        InspectSingleFilePackage();
+        return _currentSingleFilePackageInfo ?? throw new InvalidOperationException("The selected encrypted input file does not contain a valid AES UI package header.");
+    }
+
+    private static string BuildDefaultSingleFileOutputPath(string inputPath, bool encrypt)
+    {
+        if (string.IsNullOrWhiteSpace(inputPath))
+        {
+            return string.Empty;
+        }
+
+        if (encrypt)
+        {
+            return inputPath.EndsWith(".aes", StringComparison.OrdinalIgnoreCase) ? inputPath : inputPath + ".aes";
+        }
+
+        return inputPath.EndsWith(".aes", StringComparison.OrdinalIgnoreCase)
+            ? inputPath[..^4]
+            : inputPath + ".dec";
     }
 
     private void BuildFolderTab()

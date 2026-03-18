@@ -21,11 +21,25 @@ internal static class NativeOpenClMethods
     [DllImport(LibraryName, EntryPoint = "crypto_ffi_opencl_aes_ctr_decrypt_alloc", CallingConvention = CallingConvention.Cdecl)]
     internal static extern NativeStatus AesCtrDecryptAlloc(byte[] key, nuint keyLenBytes, byte[] iv16, int padding, byte[] ciphertext, nuint ciphertextLen, out nint plaintextOut, out nuint plaintextLenOut);
 
+    
+
+    [DllImport(LibraryName, EntryPoint = "crypto_ffi_opencl_aes_ctr_encrypt_file", CallingConvention = CallingConvention.Cdecl)]
+    internal static extern NativeStatus AesCtrEncryptFile(byte[] key, nuint keyLenBytes, byte[] iv16, int padding, [MarshalAs(UnmanagedType.LPStr)] string inputPath, [MarshalAs(UnmanagedType.LPStr)] string outputPath, int prefixIv);
+
+    [DllImport(LibraryName, EntryPoint = "crypto_ffi_opencl_aes_ctr_decrypt_file", CallingConvention = CallingConvention.Cdecl)]
+    internal static extern NativeStatus AesCtrDecryptFile(byte[] key, nuint keyLenBytes, byte[] iv16, int padding, [MarshalAs(UnmanagedType.LPStr)] string inputPath, [MarshalAs(UnmanagedType.LPStr)] string outputPath, int prefixIv);
+
     [DllImport(LibraryName, EntryPoint = "crypto_ffi_opencl_aes_gcm_encrypt_alloc", CallingConvention = CallingConvention.Cdecl)]
     internal static extern NativeStatus AesGcmEncryptAlloc(byte[] key, nuint keyLenBytes, byte[] iv, nuint ivLen, byte[]? aad, nuint aadLen, byte[] plaintext, nuint plaintextLen, out nint ciphertextOut, out nuint ciphertextLenOut, byte[] tag16Out);
 
     [DllImport(LibraryName, EntryPoint = "crypto_ffi_opencl_aes_gcm_decrypt_alloc", CallingConvention = CallingConvention.Cdecl)]
     internal static extern NativeStatus AesGcmDecryptAlloc(byte[] key, nuint keyLenBytes, byte[] iv, nuint ivLen, byte[]? aad, nuint aadLen, byte[] ciphertext, nuint ciphertextLen, byte[] tag16, out nint plaintextOut, out nuint plaintextLenOut);
+
+    [DllImport(LibraryName, EntryPoint = "crypto_ffi_opencl_aes_gcm_encrypt_file", CallingConvention = CallingConvention.Cdecl)]
+    internal static extern NativeStatus AesGcmEncryptFile(byte[] key, nuint keyLenBytes, byte[] iv, nuint ivLen, byte[]? aad, nuint aadLen, [MarshalAs(UnmanagedType.LPStr)] string inputPath, [MarshalAs(UnmanagedType.LPStr)] string outputPath, byte[] tag16Out);
+
+    [DllImport(LibraryName, EntryPoint = "crypto_ffi_opencl_aes_gcm_decrypt_file", CallingConvention = CallingConvention.Cdecl)]
+    internal static extern NativeStatus AesGcmDecryptFile(byte[] key, nuint keyLenBytes, byte[] iv, nuint ivLen, byte[]? aad, nuint aadLen, [MarshalAs(UnmanagedType.LPStr)] string inputPath, [MarshalAs(UnmanagedType.LPStr)] string outputPath, byte[] tag16);
 
     [DllImport(LibraryName, EntryPoint = "crypto_ffi_opencl_free", CallingConvention = CallingConvention.Cdecl)]
     internal static extern void Free(nint pointer);

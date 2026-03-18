@@ -76,8 +76,8 @@ endif
 
 CFLAGS := $(CFLAGS_BASE) $(PIC)
 
-SRC := src/aes.c src/aes_ctr.c src/aes_gcm.c src/cbc.c src/crypto_gf128.c src/crypto_padding.c src/crypto_timer.c src/crypto_profile.c src/crypto_ffi.c
-OBJ := $(OBJ_DIR)/aes.o $(OBJ_DIR)/aes_ctr.o $(OBJ_DIR)/aes_gcm.o $(OBJ_DIR)/cbc.o $(OBJ_DIR)/crypto_gf128.o $(OBJ_DIR)/crypto_padding.o $(OBJ_DIR)/crypto_timer.o $(OBJ_DIR)/crypto_profile.o $(OBJ_DIR)/crypto_ffi.o
+SRC := src/aes.c src/aes_ctr.c src/aes_gcm.c src/cbc.c src/crypto_ctr_stream.c src/crypto_gcm_stream.c src/crypto_gf128.c src/crypto_padding.c src/crypto_timer.c src/crypto_profile.c src/crypto_ffi.c
+OBJ := $(OBJ_DIR)/aes.o $(OBJ_DIR)/aes_ctr.o $(OBJ_DIR)/aes_gcm.o $(OBJ_DIR)/cbc.o $(OBJ_DIR)/crypto_ctr_stream.o $(OBJ_DIR)/crypto_gcm_stream.o $(OBJ_DIR)/crypto_gf128.o $(OBJ_DIR)/crypto_padding.o $(OBJ_DIR)/crypto_timer.o $(OBJ_DIR)/crypto_profile.o $(OBJ_DIR)/crypto_ffi.o
 
 LIB_STATIC := $(LIB_DIR)/libcrypto_aes.a
 

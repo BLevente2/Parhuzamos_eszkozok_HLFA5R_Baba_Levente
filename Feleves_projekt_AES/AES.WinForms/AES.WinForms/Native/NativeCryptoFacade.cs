@@ -25,6 +25,17 @@ public sealed class NativeCryptoFacade
         ExecuteDiscard(false, engine, algorithm, padding, key, iv16, iv12, aad, ciphertext, tag, out _);
     }
 
+
+    public byte[] EncryptFile(CryptoEngine engine, CryptoAlgorithm algorithm, CryptoPaddingMode padding, byte[] key, byte[] iv, byte[] aad, string inputPath, string outputPath)
+    {
+        return ProcessFile(true, engine, algorithm, padding, key, iv, aad, inputPath, outputPath, Array.Empty<byte>());
+    }
+
+    public void DecryptFile(CryptoEngine engine, CryptoAlgorithm algorithm, CryptoPaddingMode padding, byte[] key, byte[] iv, byte[] aad, string inputPath, string outputPath, byte[] tag)
+    {
+        ProcessFile(false, engine, algorithm, padding, key, iv, aad, inputPath, outputPath, tag);
+    }
+
     public bool TryWarmupOpenCl(out string message)
     {
         try
@@ -67,6 +78,70 @@ public sealed class NativeCryptoFacade
             CryptoEngine.ManagedAes => algorithm is CryptoAlgorithm.Cbc or CryptoAlgorithm.Gcm,
             _ => false
         };
+    }
+
+    private byte[] ProcessFile(bool encrypt, CryptoEngine engine, CryptoAlgorithm algorithm, CryptoPaddingMode padding, byte[] key, byte[] iv, byte[] aad, string inputPath, string outputPath, byte[] tag)
+    {
+        if (engine == CryptoEngine.ManagedAes)
+        {
+            throw new NotSupportedException("Managed AES is handled by a dedicated managed service.");
+        }
+
+        byte[] producedTag;
+        var status = engine switch
+        {
+            CryptoEngine.NativeCpu => ProcessCpuFile(encrypt, algorithm, padding, key, iv, aad, inputPath, outputPath, tag, out producedTag),
+            CryptoEngine.OpenCl => ProcessOpenClFile(encrypt, algorithm, padding, key, iv, aad, inputPath, outputPath, tag, out producedTag),
+            _ => throw new NotSupportedException($"Unsupported engine: {engine}.")
+        };
+
+        EnsureSuccess(engine, status);
+        return producedTag;
+    }
+
+    private static NativeStatus ProcessCpuFile(bool encrypt, CryptoAlgorithm algorithm, CryptoPaddingMode padding, byte[] key, byte[] iv, byte[] aad, string inputPath, string outputPath, byte[] tag, out byte[] producedTag)
+    {
+        producedTag = Array.Empty<byte>();
+
+        return algorithm switch
+        {
+            CryptoAlgorithm.Cbc when encrypt => NativeCpuMethods.AesCbcEncryptFile(key, (nuint)key.Length, iv, (int)padding, inputPath, outputPath, 0),
+            CryptoAlgorithm.Cbc => NativeCpuMethods.AesCbcDecryptFile(key, (nuint)key.Length, iv, (int)padding, inputPath, outputPath, 0),
+            CryptoAlgorithm.Ctr when encrypt => NativeCpuMethods.AesCtrEncryptFile(key, (nuint)key.Length, iv, (int)padding, inputPath, outputPath, 0),
+            CryptoAlgorithm.Ctr => NativeCpuMethods.AesCtrDecryptFile(key, (nuint)key.Length, iv, (int)padding, inputPath, outputPath, 0),
+            CryptoAlgorithm.Gcm when encrypt => EncryptCpuGcmFile(key, iv, aad, inputPath, outputPath, out producedTag),
+            CryptoAlgorithm.Gcm => DecryptCpuGcmFile(key, iv, aad, inputPath, outputPath, tag),
+            _ => throw new NotSupportedException($"The native CPU file API is not available for {algorithm}.")
+        };
+    }
+
+    private static NativeStatus ProcessOpenClFile(bool encrypt, CryptoAlgorithm algorithm, CryptoPaddingMode padding, byte[] key, byte[] iv, byte[] aad, string inputPath, string outputPath, byte[] tag, out byte[] producedTag)
+    {
+        producedTag = Array.Empty<byte>();
+
+        return algorithm switch
+        {
+            CryptoAlgorithm.Ctr when encrypt => NativeOpenClMethods.AesCtrEncryptFile(key, (nuint)key.Length, iv, (int)padding, inputPath, outputPath, 0),
+            CryptoAlgorithm.Ctr => NativeOpenClMethods.AesCtrDecryptFile(key, (nuint)key.Length, iv, (int)padding, inputPath, outputPath, 0),
+            CryptoAlgorithm.Gcm when encrypt => EncryptOpenClGcmFile(key, iv, aad, inputPath, outputPath, out producedTag),
+            CryptoAlgorithm.Gcm => DecryptOpenClGcmFile(key, iv, aad, inputPath, outputPath, tag),
+            _ => throw new NotSupportedException($"The OpenCL file API is not available for {algorithm}.")
+        };
+    }
+
+    private void EnsureSuccess(CryptoEngine engine, NativeStatus status)
+    {
+        if (status == NativeStatus.Ok)
+        {
+            return;
+        }
+
+        if (engine == CryptoEngine.OpenCl)
+        {
+            throw new InvalidOperationException($"The OpenCL operation failed with {GetOpenClErrorMessage(status)}");
+        }
+
+        throw new InvalidOperationException($"The {engine} operation failed with status {(int)status} ({status}).");
     }
 
     private byte[] Transform(bool encrypt, CryptoEngine engine, CryptoAlgorithm algorithm, CryptoPaddingMode padding, byte[] key, byte[] iv16, byte[] iv12, byte[] aad, byte[] input, byte[] providedTag, out byte[] tag)
@@ -214,6 +289,38 @@ public sealed class NativeCryptoFacade
         }
 
         return NativeOpenClMethods.AesGcmDecryptAlloc(key, (nuint)key.Length, iv12, (nuint)iv12.Length, aad, (nuint)aad.Length, input, (nuint)input.Length, providedTag, out outputPointer, out outputLength);
+    }
+
+    private static NativeStatus EncryptCpuGcmFile(byte[] key, byte[] iv, byte[] aad, string inputPath, string outputPath, out byte[] tag)
+    {
+        tag = new byte[16];
+        return NativeCpuMethods.AesGcmEncryptFile(key, (nuint)key.Length, iv, (nuint)iv.Length, aad, (nuint)aad.Length, inputPath, outputPath, tag);
+    }
+
+    private static NativeStatus DecryptCpuGcmFile(byte[] key, byte[] iv, byte[] aad, string inputPath, string outputPath, byte[] providedTag)
+    {
+        if (providedTag.Length != 16)
+        {
+            throw new ArgumentException("GCM requires a 16-byte authentication tag.", nameof(providedTag));
+        }
+
+        return NativeCpuMethods.AesGcmDecryptFile(key, (nuint)key.Length, iv, (nuint)iv.Length, aad, (nuint)aad.Length, inputPath, outputPath, providedTag);
+    }
+
+    private static NativeStatus EncryptOpenClGcmFile(byte[] key, byte[] iv, byte[] aad, string inputPath, string outputPath, out byte[] tag)
+    {
+        tag = new byte[16];
+        return NativeOpenClMethods.AesGcmEncryptFile(key, (nuint)key.Length, iv, (nuint)iv.Length, aad, (nuint)aad.Length, inputPath, outputPath, tag);
+    }
+
+    private static NativeStatus DecryptOpenClGcmFile(byte[] key, byte[] iv, byte[] aad, string inputPath, string outputPath, byte[] providedTag)
+    {
+        if (providedTag.Length != 16)
+        {
+            throw new ArgumentException("GCM requires a 16-byte authentication tag.", nameof(providedTag));
+        }
+
+        return NativeOpenClMethods.AesGcmDecryptFile(key, (nuint)key.Length, iv, (nuint)iv.Length, aad, (nuint)aad.Length, inputPath, outputPath, providedTag);
     }
 
     private static void HandleStatusAndFree(nint pointer, NativeStatus status, Action<nint> freeAction, string engineName)

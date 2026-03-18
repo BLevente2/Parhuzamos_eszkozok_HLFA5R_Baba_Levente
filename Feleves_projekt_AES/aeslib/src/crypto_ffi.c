@@ -6,6 +6,8 @@
 
 #include "aes.h"
 #include "aes_ctr.h"
+#include "crypto_ctr_stream.h"
+#include "crypto_gcm_stream.h"
 #include "crypto_padding.h"
 
 static void secure_zero(void* p, size_t n)
@@ -803,6 +805,289 @@ crypto_status_t crypto_ffi_aes_gcm_decrypt_alloc(const uint8_t* key,
     *plaintext_out = out;
     *plaintext_len_out = ciphertext_len;
     return CRYPTO_OK;
+}
+
+typedef struct cpu_gcm_xor_context_t {
+    const crypto_aes_t* aes;
+    const uint8_t* j0;
+} cpu_gcm_xor_context_t;
+
+static crypto_status_t cpu_gcm_xor_callback(void* context,
+                                           const uint8_t* input,
+                                           uint8_t* output,
+                                           size_t len,
+                                           uint64_t block_offset)
+{
+    const cpu_gcm_xor_context_t* ctx = (const cpu_gcm_xor_context_t*)context;
+
+    if (!ctx || !ctx->aes || !ctx->j0) {
+        return CRYPTO_INVALID_ARG;
+    }
+
+    return crypto_aes_ctr_xor_aes(ctx->aes, ctx->j0, input, output, len, block_offset);
+}
+
+crypto_status_t crypto_ffi_aes_gcm_encrypt_file(const uint8_t* key,
+                                               size_t key_len_bytes,
+                                               const uint8_t* iv,
+                                               size_t iv_len,
+                                               const uint8_t* aad,
+                                               size_t aad_len,
+                                               const char* input_path,
+                                               const char* output_path,
+                                               uint8_t tag16_out[16])
+{
+    FILE* fin;
+    FILE* fout;
+    crypto_aes_t aes;
+    crypto_gcm_stream_state_t gcm;
+    crypto_ctr_stream_state_t ctr;
+    cpu_gcm_xor_context_t xor_ctx;
+    crypto_status_t st;
+    size_t chunk;
+    uint8_t* in_buf;
+    uint8_t* out_buf;
+
+    if (!key || !iv || !input_path || !output_path || !tag16_out) {
+        return CRYPTO_INVALID_ARG;
+    }
+
+    if (aad_len && !aad) {
+        return CRYPTO_INVALID_ARG;
+    }
+
+    fin = fopen(input_path, "rb");
+    if (!fin) {
+        return CRYPTO_IO_ERROR;
+    }
+
+    fout = fopen(output_path, "wb");
+    if (!fout) {
+        fclose(fin);
+        return CRYPTO_IO_ERROR;
+    }
+
+    st = parse_chunk_size(&chunk);
+    if (st != CRYPTO_OK) {
+        fclose(fin);
+        fclose(fout);
+        return st;
+    }
+
+    in_buf = (uint8_t*)malloc(chunk ? chunk : 1);
+    out_buf = (uint8_t*)malloc(chunk ? chunk : 1);
+    if (!in_buf || !out_buf) {
+        free(in_buf);
+        free(out_buf);
+        fclose(fin);
+        fclose(fout);
+        return CRYPTO_INTERNAL_ERROR;
+    }
+
+    st = aes_key_init(&aes, key, key_len_bytes);
+    if (st != CRYPTO_OK) {
+        free(in_buf);
+        free(out_buf);
+        fclose(fin);
+        fclose(fout);
+        return st;
+    }
+
+    st = crypto_gcm_stream_init(&gcm, &aes, iv, iv_len, aad, aad_len);
+    if (st != CRYPTO_OK) {
+        crypto_aes_clear(&aes);
+        free(in_buf);
+        free(out_buf);
+        fclose(fin);
+        fclose(fout);
+        return st;
+    }
+
+    crypto_ctr_stream_init(&ctr, 1u);
+    xor_ctx.aes = &aes;
+    xor_ctx.j0 = gcm.j0;
+
+    while (1) {
+        size_t n = fread(in_buf, 1, chunk, fin);
+
+        if (n == 0) {
+            if (ferror(fin)) {
+                st = CRYPTO_IO_ERROR;
+                break;
+            }
+            st = CRYPTO_OK;
+            break;
+        }
+
+        st = crypto_ctr_stream_xor(&ctr, cpu_gcm_xor_callback, &xor_ctx, in_buf, out_buf, n);
+        if (st != CRYPTO_OK) {
+            break;
+        }
+
+        st = crypto_gcm_stream_update_ciphertext(&gcm, out_buf, n);
+        if (st != CRYPTO_OK) {
+            break;
+        }
+
+        if (fwrite(out_buf, 1, n, fout) != n) {
+            st = CRYPTO_IO_ERROR;
+            break;
+        }
+    }
+
+    if (st == CRYPTO_OK) {
+        st = crypto_gcm_stream_finalize_tag(&gcm, &aes, tag16_out);
+    }
+
+    crypto_ctr_stream_clear(&ctr);
+    crypto_gcm_stream_clear(&gcm);
+    crypto_aes_clear(&aes);
+    secure_zero(in_buf, chunk);
+    secure_zero(out_buf, chunk);
+    free(in_buf);
+    free(out_buf);
+    fclose(fin);
+    fclose(fout);
+
+    if (st != CRYPTO_OK) {
+        remove(output_path);
+    }
+
+    return st;
+}
+
+crypto_status_t crypto_ffi_aes_gcm_decrypt_file(const uint8_t* key,
+                                               size_t key_len_bytes,
+                                               const uint8_t* iv,
+                                               size_t iv_len,
+                                               const uint8_t* aad,
+                                               size_t aad_len,
+                                               const char* input_path,
+                                               const char* output_path,
+                                               const uint8_t tag16[16])
+{
+    FILE* fin;
+    FILE* fout;
+    crypto_aes_t aes;
+    crypto_gcm_stream_state_t gcm;
+    crypto_ctr_stream_state_t ctr;
+    cpu_gcm_xor_context_t xor_ctx;
+    crypto_status_t st;
+    size_t chunk;
+    uint8_t* in_buf;
+    uint8_t* out_buf;
+    uint8_t expected[16];
+
+    if (!key || !iv || !input_path || !output_path || !tag16) {
+        return CRYPTO_INVALID_ARG;
+    }
+
+    if (aad_len && !aad) {
+        return CRYPTO_INVALID_ARG;
+    }
+
+    fin = fopen(input_path, "rb");
+    if (!fin) {
+        return CRYPTO_IO_ERROR;
+    }
+
+    fout = fopen(output_path, "wb");
+    if (!fout) {
+        fclose(fin);
+        return CRYPTO_IO_ERROR;
+    }
+
+    st = parse_chunk_size(&chunk);
+    if (st != CRYPTO_OK) {
+        fclose(fin);
+        fclose(fout);
+        return st;
+    }
+
+    in_buf = (uint8_t*)malloc(chunk ? chunk : 1);
+    out_buf = (uint8_t*)malloc(chunk ? chunk : 1);
+    if (!in_buf || !out_buf) {
+        free(in_buf);
+        free(out_buf);
+        fclose(fin);
+        fclose(fout);
+        return CRYPTO_INTERNAL_ERROR;
+    }
+
+    st = aes_key_init(&aes, key, key_len_bytes);
+    if (st != CRYPTO_OK) {
+        free(in_buf);
+        free(out_buf);
+        fclose(fin);
+        fclose(fout);
+        return st;
+    }
+
+    st = crypto_gcm_stream_init(&gcm, &aes, iv, iv_len, aad, aad_len);
+    if (st != CRYPTO_OK) {
+        crypto_aes_clear(&aes);
+        free(in_buf);
+        free(out_buf);
+        fclose(fin);
+        fclose(fout);
+        return st;
+    }
+
+    crypto_ctr_stream_init(&ctr, 1u);
+    xor_ctx.aes = &aes;
+    xor_ctx.j0 = gcm.j0;
+
+    while (1) {
+        size_t n = fread(in_buf, 1, chunk, fin);
+
+        if (n == 0) {
+            if (ferror(fin)) {
+                st = CRYPTO_IO_ERROR;
+                break;
+            }
+            st = CRYPTO_OK;
+            break;
+        }
+
+        st = crypto_gcm_stream_update_ciphertext(&gcm, in_buf, n);
+        if (st != CRYPTO_OK) {
+            break;
+        }
+
+        st = crypto_ctr_stream_xor(&ctr, cpu_gcm_xor_callback, &xor_ctx, in_buf, out_buf, n);
+        if (st != CRYPTO_OK) {
+            break;
+        }
+
+        if (fwrite(out_buf, 1, n, fout) != n) {
+            st = CRYPTO_IO_ERROR;
+            break;
+        }
+    }
+
+    if (st == CRYPTO_OK) {
+        st = crypto_gcm_stream_finalize_tag(&gcm, &aes, expected);
+        if (st == CRYPTO_OK && memcmp(expected, tag16, 16) != 0) {
+            st = CRYPTO_AUTH_FAILED;
+        }
+    }
+
+    secure_zero(expected, sizeof(expected));
+    crypto_ctr_stream_clear(&ctr);
+    crypto_gcm_stream_clear(&gcm);
+    crypto_aes_clear(&aes);
+    secure_zero(in_buf, chunk);
+    secure_zero(out_buf, chunk);
+    free(in_buf);
+    free(out_buf);
+    fclose(fin);
+    fclose(fout);
+
+    if (st != CRYPTO_OK) {
+        remove(output_path);
+    }
+
+    return st;
 }
 
 void crypto_ffi_free(void* p)

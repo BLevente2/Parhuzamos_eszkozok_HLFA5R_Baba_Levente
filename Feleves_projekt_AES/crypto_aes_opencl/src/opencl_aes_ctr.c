@@ -194,16 +194,16 @@ static crypto_status_t ocl_choose_platform_device(cl_platform_id* out_platform, 
     return CRYPTO_OK;
 }
 
-static crypto_status_t crypto_ocl_aes_gcm_ctr_xor_round_keys(const uint8_t* round_keys,
-                                                            size_t round_keys_len,
-                                                            const uint8_t j0[16],
-                                                            const uint8_t* input,
-                                                            uint8_t* output,
-                                                            size_t len,
-                                                            uint64_t block_offset,
-                                                            int upload_input,
-                                                            int download_output,
-                                                            uint64_t* out_kernel_ns)
+static crypto_status_t crypto_ocl_aes_gcm_ctr_xor_round_keys_internal(const uint8_t* round_keys,
+                                                                     size_t round_keys_len,
+                                                                     const uint8_t j0[16],
+                                                                     const uint8_t* input,
+                                                                     uint8_t* output,
+                                                                     size_t len,
+                                                                     uint64_t block_offset,
+                                                                     int upload_input,
+                                                                     int download_output,
+                                                                     uint64_t* out_kernel_ns)
 {
     crypto_status_t st;
     uint64_t iv_hi;
@@ -284,6 +284,18 @@ static crypto_status_t crypto_ocl_aes_gcm_ctr_xor_round_keys(const uint8_t* roun
     }
 
     return CRYPTO_OK;
+}
+
+crypto_status_t crypto_ocl_aes_gcm_ctr_xor_round_keys(const uint8_t* round_keys,
+                                                           size_t round_keys_len,
+                                                           const uint8_t j0[16],
+                                                           const uint8_t* input,
+                                                           uint8_t* output,
+                                                           size_t len,
+                                                           uint64_t block_offset,
+                                                           uint64_t* out_kernel_ns)
+{
+    return crypto_ocl_aes_gcm_ctr_xor_round_keys_internal(round_keys, round_keys_len, j0, input, output, len, block_offset, 1, 1, out_kernel_ns);
 }
 
 static void join_path(char* out_path, size_t cap, const char* dir, const char* file)
@@ -1720,7 +1732,7 @@ crypto_status_t crypto_ocl_aes_gcm_encrypt(const uint8_t* key,
 
     if (plaintext_len) {
         t_stage = crypto_time_now_ns();
-        st = crypto_ocl_aes_gcm_ctr_xor_round_keys(aes.round_keys, crypto_aes_round_keys_bytes(&aes), j0, plaintext, ciphertext_out, plaintext_len, 1, 1, 1, &k1);
+        st = crypto_ocl_aes_gcm_ctr_xor_round_keys_internal(aes.round_keys, crypto_aes_round_keys_bytes(&aes), j0, plaintext, ciphertext_out, plaintext_len, 1, 1, 1, &k1);
 #ifdef CRYPTO_OCL_PROFILE
         crypto_ocl_profile_add_gcm_ctr_stage(crypto_time_now_ns() - t_stage);
 #endif
@@ -1876,7 +1888,7 @@ crypto_status_t crypto_ocl_aes_gcm_decrypt(const uint8_t* key,
 
     if (ciphertext_len) {
         t_stage = crypto_time_now_ns();
-        st = crypto_ocl_aes_gcm_ctr_xor_round_keys(aes.round_keys, crypto_aes_round_keys_bytes(&aes), j0, NULL, plaintext_out, ciphertext_len, 1, 0, 1, &k1);
+        st = crypto_ocl_aes_gcm_ctr_xor_round_keys_internal(aes.round_keys, crypto_aes_round_keys_bytes(&aes), j0, NULL, plaintext_out, ciphertext_len, 1, 0, 1, &k1);
 #ifdef CRYPTO_OCL_PROFILE
         crypto_ocl_profile_add_gcm_ctr_stage(crypto_time_now_ns() - t_stage);
 #endif
