@@ -30,11 +30,11 @@ public sealed class Form1 : Form
     private readonly Button _benchmarkCancelButton = new() { Text = "Cancel", AutoSize = true, Enabled = false };
     private readonly Button _benchmarkExportButton = new() { Text = "Export CSV", AutoSize = true, Enabled = false };
     private readonly Button _benchmarkImportButton = new() { Text = "Import CSV", AutoSize = true };
-    private readonly ProgressBar _benchmarkProgressBar = new() { Dock = DockStyle.Fill, Visible = false, Style = ProgressBarStyle.Marquee, MarqueeAnimationSpeed = 30 };
+    private readonly ProgressBar _benchmarkProgressBar = new() { Dock = DockStyle.Fill, Visible = false, Style = ProgressBarStyle.Marquee, MarqueeAnimationSpeed = 30, Height = 22 };
     private readonly Label _benchmarkStatusLabel = new() { Dock = DockStyle.Fill, AutoEllipsis = true, Text = "Ready." };
     private readonly DataGridView _benchmarkSummaryGrid = CreateGrid();
     private readonly DataGridView _benchmarkDetailsGrid = CreateGrid();
-    private readonly BenchmarkChartControl _benchmarkChart = new() { Dock = DockStyle.Fill, Height = 280 };
+    private readonly BenchmarkChartControl _benchmarkChart = new() { Dock = DockStyle.Fill };
     private readonly TextBox _benchmarkNotesTextBox = new() { Dock = DockStyle.Fill, ReadOnly = true, Multiline = true, ScrollBars = ScrollBars.Vertical };
     private readonly TextBox _diagnosticsTextBox = new() { Dock = DockStyle.Fill, Multiline = true, ScrollBars = ScrollBars.Both, ReadOnly = true, Font = new Font("Consolas", 9f) };
 
@@ -60,8 +60,8 @@ public sealed class Form1 : Form
     {
         SuspendLayout();
         AutoScaleMode = AutoScaleMode.Font;
-        ClientSize = new Size(1520, 920);
-        MinimumSize = new Size(1280, 760);
+        ClientSize = new Size(1280, 820);
+        MinimumSize = new Size(720, 540);
         StartPosition = FormStartPosition.CenterScreen;
         Text = "AES Showcase - WinForms UI";
 
@@ -77,20 +77,11 @@ public sealed class Form1 : Form
     private void BuildSingleFileTab()
     {
         var page = new TabPage("Single file");
-        var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, Padding = new Padding(16) };
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+        var root = CreatePageRoot();
 
-        var header = CreateHeaderLabel("Single-file encryption and decryption");
-        root.Controls.Add(header, 0, 0);
+        root.Controls.Add(CreateHeaderLabel("Single-file encryption and decryption"), 0, 0);
 
-        var form = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 4, AutoSize = true };
-        for (var column = 0; column < 4; column++)
-        {
-            form.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25f));
-        }
+        var form = CreateResponsiveFieldTable(2);
 
         var operationCombo = CreateDropDown();
         operationCombo.Items.AddRange(new object[] { "Encrypt", "Decrypt" });
@@ -125,41 +116,35 @@ public sealed class Form1 : Form
 
         AddLabeledControl(form, 0, 0, "Operation", operationCombo);
         AddLabeledControl(form, 1, 0, "Engine", engineCombo);
-        AddLabeledControl(form, 2, 0, "Algorithm", algorithmCombo);
-        AddLabeledControl(form, 3, 0, "Padding", paddingCombo);
-        AddLabeledControl(form, 0, 1, "Key size (bits)", keyCombo);
-        AddLabeledControl(form, 1, 1, "Password", passwordTextBox);
-        AddLabeledControl(form, 2, 1, "Input file", inputPathTextBox);
-        AddLabeledControl(form, 3, 1, "Output file", outputPathTextBox);
+        AddLabeledControl(form, 0, 1, "Algorithm", algorithmCombo);
+        AddLabeledControl(form, 1, 1, "Padding", paddingCombo);
+        AddLabeledControl(form, 0, 2, "Key size (bits)", keyCombo);
+        AddLabeledControl(form, 1, 2, "Password", passwordTextBox);
+        AddLabeledControl(form, 0, 3, "Input file", inputPathTextBox);
+        AddLabeledControl(form, 1, 3, "Output file", outputPathTextBox);
 
-        var buttonsPanel = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true };
+        var buttonsPanel = CreateButtonPanel();
         buttonsPanel.Controls.AddRange(new Control[] { browseInputButton, browseOutputButton, runButton });
 
         var infoBox = CreateInfoTextBox("This tab already contains the UI structure for file mode, but the actual file pipeline, metadata header format, and streamed native file processing are scheduled for the next implementation phase.");
+        infoBox.Height = 160;
 
         root.Controls.Add(form, 0, 1);
         root.Controls.Add(buttonsPanel, 0, 2);
         root.Controls.Add(infoBox, 0, 3);
-        page.Controls.Add(root);
+
+        page.Controls.Add(CreateScrollableHost(root));
         _tabControl.TabPages.Add(page);
     }
 
     private void BuildFolderTab()
     {
         var page = new TabPage("Folder processing");
-        var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, Padding = new Padding(16) };
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+        var root = CreatePageRoot();
 
         root.Controls.Add(CreateHeaderLabel("Folder-level encryption and decryption"), 0, 0);
 
-        var form = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 4, AutoSize = true };
-        for (var column = 0; column < 4; column++)
-        {
-            form.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25f));
-        }
+        var form = CreateResponsiveFieldTable(2);
 
         var operationCombo = CreateDropDown();
         operationCombo.Items.AddRange(new object[] { "Encrypt", "Decrypt" });
@@ -194,14 +179,14 @@ public sealed class Form1 : Form
 
         AddLabeledControl(form, 0, 0, "Operation", operationCombo);
         AddLabeledControl(form, 1, 0, "Execution mode", executionModeCombo);
-        AddLabeledControl(form, 2, 0, "Algorithm", algorithmCombo);
-        AddLabeledControl(form, 3, 0, "Padding", paddingCombo);
-        AddLabeledControl(form, 0, 1, "Key size (bits)", keyCombo);
-        AddLabeledControl(form, 1, 1, "Password", passwordTextBox);
-        AddLabeledControl(form, 2, 1, "Input folder", inputFolderTextBox);
-        AddLabeledControl(form, 3, 1, "Output folder", outputFolderTextBox);
+        AddLabeledControl(form, 0, 1, "Algorithm", algorithmCombo);
+        AddLabeledControl(form, 1, 1, "Padding", paddingCombo);
+        AddLabeledControl(form, 0, 2, "Key size (bits)", keyCombo);
+        AddLabeledControl(form, 1, 2, "Password", passwordTextBox);
+        AddLabeledControl(form, 0, 3, "Input folder", inputFolderTextBox);
+        AddLabeledControl(form, 1, 3, "Output folder", outputFolderTextBox);
 
-        var buttonPanel = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true };
+        var buttonPanel = CreateButtonPanel();
         var browseInputButton = new Button { Text = "Browse input folder...", AutoSize = true };
         var browseOutputButton = new Button { Text = "Browse output folder...", AutoSize = true };
         var runButton = new Button { Text = "Run folder job", AutoSize = true };
@@ -211,23 +196,20 @@ public sealed class Form1 : Form
         buttonPanel.Controls.AddRange(new Control[] { browseInputButton, browseOutputButton, runButton, includeSubfoldersCheckBox });
 
         var infoBox = CreateInfoTextBox("This tab is prepared for the future folder scheduler. The remaining missing piece is a native batch execution API that handles file-level parallelism outside C#.");
+        infoBox.Height = 160;
 
         root.Controls.Add(form, 0, 1);
         root.Controls.Add(buttonPanel, 0, 2);
         root.Controls.Add(infoBox, 0, 3);
-        page.Controls.Add(root);
+
+        page.Controls.Add(CreateScrollableHost(root));
         _tabControl.TabPages.Add(page);
     }
 
     private void BuildBenchmarkTab()
     {
         var page = new TabPage("Benchmark");
-        var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5, Padding = new Padding(16) };
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 48f));
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 52f));
+        var root = CreatePageRoot();
 
         root.Controls.Add(CreateHeaderLabel("Benchmark native CPU, OpenCL, and managed .NET AES"), 0, 0);
 
@@ -245,81 +227,55 @@ public sealed class Form1 : Form
         _benchmarkExportButton.Click += (_, _) => ExportBenchmarkCsv();
         _benchmarkImportButton.Click += (_, _) => ImportBenchmarkCsv();
 
-        var optionsPanel = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 6, AutoSize = true };
-        for (var column = 0; column < 6; column++)
-        {
-            optionsPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 16.6666f));
-        }
-
+        var optionsPanel = CreateResponsiveFieldTable(3);
         AddLabeledControl(optionsPanel, 0, 0, "Algorithm", _benchmarkAlgorithmComboBox);
         AddLabeledControl(optionsPanel, 1, 0, "Padding", _benchmarkPaddingComboBox);
         AddLabeledControl(optionsPanel, 2, 0, "Key size (bits)", _benchmarkKeySizeComboBox);
-        AddLabeledControl(optionsPanel, 3, 0, "Data size (MB)", _benchmarkDataSizeNumeric);
-        AddLabeledControl(optionsPanel, 4, 0, "Iterations", _benchmarkIterationNumeric);
-        AddLabeledControl(optionsPanel, 5, 0, "Password", _benchmarkPasswordTextBox);
+        AddLabeledControl(optionsPanel, 0, 1, "Data size (MB)", _benchmarkDataSizeNumeric);
+        AddLabeledControl(optionsPanel, 1, 1, "Iterations", _benchmarkIterationNumeric);
+        AddLabeledControl(optionsPanel, 2, 1, "Password", _benchmarkPasswordTextBox);
 
-        var commandsPanel = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 6, AutoSize = true };
-        commandsPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        commandsPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        commandsPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        commandsPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        commandsPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-        commandsPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 280f));
-        commandsPanel.Controls.Add(_benchmarkRunButton, 0, 0);
-        commandsPanel.Controls.Add(_benchmarkCancelButton, 1, 0);
-        commandsPanel.Controls.Add(_benchmarkExportButton, 2, 0);
-        commandsPanel.Controls.Add(_benchmarkImportButton, 3, 0);
-        commandsPanel.Controls.Add(_benchmarkWarmupCheckBox, 4, 0);
-        commandsPanel.Controls.Add(_benchmarkProgressBar, 5, 0);
-        commandsPanel.Controls.Add(_benchmarkStatusLabel, 0, 1);
-        commandsPanel.SetColumnSpan(_benchmarkStatusLabel, 6);
+        var commandPanel = CreateButtonPanel();
+        commandPanel.Controls.AddRange(new Control[]
+        {
+            _benchmarkRunButton,
+            _benchmarkCancelButton,
+            _benchmarkExportButton,
+            _benchmarkImportButton,
+            _benchmarkWarmupCheckBox
+        });
 
-        var upperSplit = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Vertical, SplitterDistance = 720 };
-        upperSplit.Panel1.Padding = new Padding(0, 8, 8, 8);
-        upperSplit.Panel2.Padding = new Padding(8, 8, 0, 8);
+        var statusPanel = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = 1,
+            Margin = new Padding(0, 0, 0, 12)
+        };
+        statusPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+        statusPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        statusPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        statusPanel.Controls.Add(_benchmarkStatusLabel, 0, 0);
+        statusPanel.Controls.Add(_benchmarkProgressBar, 0, 1);
 
-        var summaryLayout = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 2, ColumnCount = 1 };
-        summaryLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        summaryLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
-        summaryLayout.Controls.Add(CreateSectionLabel("Summary table"), 0, 0);
-        summaryLayout.Controls.Add(_benchmarkSummaryGrid, 0, 1);
         ConfigureSummaryGrid();
-
-        var chartLayout = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 2, ColumnCount = 1 };
-        chartLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        chartLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
-        chartLayout.Controls.Add(CreateSectionLabel("Chart"), 0, 0);
-        chartLayout.Controls.Add(_benchmarkChart, 0, 1);
-
-        upperSplit.Panel1.Controls.Add(summaryLayout);
-        upperSplit.Panel2.Controls.Add(chartLayout);
-
-        var lowerSplit = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Horizontal, SplitterDistance = 280 };
-        lowerSplit.Panel1.Padding = new Padding(0, 8, 0, 8);
-        lowerSplit.Panel2.Padding = new Padding(0, 8, 0, 0);
-
-        var detailsLayout = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 2, ColumnCount = 1 };
-        detailsLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        detailsLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
-        detailsLayout.Controls.Add(CreateSectionLabel("Per-run details"), 0, 0);
-        detailsLayout.Controls.Add(_benchmarkDetailsGrid, 0, 1);
         ConfigureDetailsGrid();
 
-        var notesLayout = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 2, ColumnCount = 1 };
-        notesLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        notesLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
-        notesLayout.Controls.Add(CreateSectionLabel("Session notes and metadata"), 0, 0);
-        notesLayout.Controls.Add(_benchmarkNotesTextBox, 0, 1);
-
-        lowerSplit.Panel1.Controls.Add(detailsLayout);
-        lowerSplit.Panel2.Controls.Add(notesLayout);
+        var summarySection = CreateSectionContainer("Summary table", _benchmarkSummaryGrid, 240);
+        var chartSection = CreateSectionContainer("Chart", _benchmarkChart, 320);
+        var detailsSection = CreateSectionContainer("Per-run details", _benchmarkDetailsGrid, 280);
+        var notesSection = CreateSectionContainer("Session notes and metadata", _benchmarkNotesTextBox, 220);
 
         root.Controls.Add(optionsPanel, 0, 1);
-        root.Controls.Add(commandsPanel, 0, 2);
-        root.Controls.Add(upperSplit, 0, 3);
-        root.Controls.Add(lowerSplit, 0, 4);
+        root.Controls.Add(commandPanel, 0, 2);
+        root.Controls.Add(statusPanel, 0, 3);
+        root.Controls.Add(summarySection, 0, 4);
+        root.Controls.Add(chartSection, 0, 5);
+        root.Controls.Add(detailsSection, 0, 6);
+        root.Controls.Add(notesSection, 0, 7);
 
-        page.Controls.Add(root);
+        page.Controls.Add(CreateScrollableHost(root));
         _tabControl.TabPages.Add(page);
         SyncPaddingState();
     }
@@ -578,6 +534,78 @@ public sealed class Form1 : Form
         _diagnosticsTextBox.Text = _environmentInspectionService.BuildDiagnosticsReport();
     }
 
+    private static TableLayoutPanel CreatePageRoot()
+    {
+        var root = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = 1,
+            Padding = new Padding(16)
+        };
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+        return root;
+    }
+
+    private static Panel CreateScrollableHost(Control content)
+    {
+        var host = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
+        host.Controls.Add(content);
+        return host;
+    }
+
+    private static TableLayoutPanel CreateResponsiveFieldTable(int columnCount)
+    {
+        var panel = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = columnCount,
+            Margin = new Padding(0, 0, 0, 12)
+        };
+
+        for (var column = 0; column < columnCount; column++)
+        {
+            panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f / columnCount));
+        }
+
+        return panel;
+    }
+
+    private static FlowLayoutPanel CreateButtonPanel()
+    {
+        return new FlowLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            WrapContents = true,
+            FlowDirection = FlowDirection.LeftToRight,
+            Margin = new Padding(0, 0, 0, 8)
+        };
+    }
+
+    private static Panel CreateSectionContainer(string title, Control body, int bodyHeight)
+    {
+        var container = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            ColumnCount = 1,
+            RowCount = 2,
+            Height = bodyHeight + 42,
+            Margin = new Padding(0, 0, 0, 12),
+            Padding = new Padding(0)
+        };
+        container.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+        container.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        container.RowStyles.Add(new RowStyle(SizeType.Absolute, bodyHeight));
+        container.Controls.Add(CreateSectionLabel(title), 0, 0);
+        container.Controls.Add(body, 0, 1);
+        return container;
+    }
+
     private static Label CreateHeaderLabel(string text)
     {
         return new Label
@@ -627,13 +655,13 @@ public sealed class Form1 : Form
     {
         return new TextBox
         {
-            Dock = DockStyle.Fill,
+            Dock = DockStyle.Top,
             Multiline = true,
-            Height = 120,
             ReadOnly = true,
             Text = text,
             BackColor = Color.White,
-            BorderStyle = BorderStyle.FixedSingle
+            BorderStyle = BorderStyle.FixedSingle,
+            ScrollBars = ScrollBars.Vertical
         };
     }
 
@@ -645,7 +673,8 @@ public sealed class Form1 : Form
             panel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         }
 
-        var label = new Label { Text = labelText, AutoSize = true, Margin = new Padding(0, 8, 0, 4) };
+        control.Margin = new Padding(0, 0, 12, 0);
+        var label = new Label { Text = labelText, AutoSize = true, Margin = new Padding(0, 8, 12, 4) };
         panel.Controls.Add(label, column, row * 2);
         panel.Controls.Add(control, column, row * 2 + 1);
     }
