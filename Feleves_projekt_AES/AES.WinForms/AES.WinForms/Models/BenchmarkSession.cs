@@ -11,6 +11,7 @@ public sealed class BenchmarkSession
     public required string AadBase64 { get; init; }
     public required IReadOnlyList<BenchmarkResultRow> Rows { get; init; }
     public required IReadOnlyList<BenchmarkSummary> Summaries { get; init; }
+    public required BenchmarkEnvironmentInfo EnvironmentInfo { get; init; }
     public required string EnvironmentDescription { get; init; }
     public string Notes { get; init; } = string.Empty;
 }

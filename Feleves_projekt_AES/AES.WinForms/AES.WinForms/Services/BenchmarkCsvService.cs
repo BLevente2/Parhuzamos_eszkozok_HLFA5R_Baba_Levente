@@ -9,6 +9,7 @@ public sealed class BenchmarkCsvService
     public string CreateCsv(BenchmarkSession session)
     {
         var builder = new StringBuilder();
+        var environmentInfo = session.EnvironmentInfo ?? new BenchmarkEnvironmentInfo();
 
         AppendMetadata(builder, "SessionId", session.SessionId.ToString());
         AppendMetadata(builder, "CreatedUtc", session.CreatedUtc.ToString("O", CultureInfo.InvariantCulture));
@@ -24,6 +25,29 @@ public sealed class BenchmarkCsvService
         AppendMetadata(builder, "Iv12Base64", session.Iv12Base64);
         AppendMetadata(builder, "AadBase64", session.AadBase64);
         AppendMetadata(builder, "EnvironmentDescription", session.EnvironmentDescription);
+        AppendMetadata(builder, "FrameworkDescription", environmentInfo.FrameworkDescription);
+        AppendMetadata(builder, "OperatingSystemDescription", environmentInfo.OperatingSystemDescription);
+        AppendMetadata(builder, "WindowsVersion", environmentInfo.WindowsVersion);
+        AppendMetadata(builder, "WindowsBuild", environmentInfo.WindowsBuild);
+        AppendMetadata(builder, "ProcessArchitecture", environmentInfo.ProcessArchitecture);
+        AppendMetadata(builder, "BuildArchitecture", environmentInfo.BuildArchitecture);
+        AppendMetadata(builder, "LogicalProcessorCount", environmentInfo.LogicalProcessorCount);
+        AppendMetadata(builder, "ProcessorName", environmentInfo.ProcessorName);
+        AppendMetadata(builder, "ProcessorCoreCount", environmentInfo.ProcessorCoreCount);
+        AppendMetadata(builder, "ProcessorLogicalCoreCount", environmentInfo.ProcessorLogicalCoreCount);
+        AppendMetadata(builder, "ProcessorMaxClockMHz", environmentInfo.ProcessorMaxClockMHz);
+        AppendMetadata(builder, "GpuName", environmentInfo.GpuName);
+        AppendMetadata(builder, "MotherboardName", environmentInfo.MotherboardName);
+        AppendMetadata(builder, "PowerSource", environmentInfo.PowerSource);
+        AppendMetadata(builder, "WindowsPowerPlan", environmentInfo.WindowsPowerPlan);
+        AppendMetadata(builder, "RamTotal", environmentInfo.RamTotal);
+        AppendMetadata(builder, "RamModules", environmentInfo.RamModules);
+        AppendMetadata(builder, "OpenClPlatformName", environmentInfo.OpenClPlatformName);
+        AppendMetadata(builder, "OpenClPlatformVersion", environmentInfo.OpenClPlatformVersion);
+        AppendMetadata(builder, "OpenClDeviceName", environmentInfo.OpenClDeviceName);
+        AppendMetadata(builder, "OpenClDeviceVersion", environmentInfo.OpenClDeviceVersion);
+        AppendMetadata(builder, "OpenClCVersion", environmentInfo.OpenClCVersion);
+        AppendMetadata(builder, "OpenClInfoStatus", environmentInfo.OpenClInfoStatus);
         AppendMetadata(builder, "Notes", session.Notes);
         builder.AppendLine();
 
@@ -125,6 +149,33 @@ public sealed class BenchmarkCsvService
             Password = metadata.GetValueOrDefault("Password", string.Empty)
         };
 
+        var environmentInfo = new BenchmarkEnvironmentInfo
+        {
+            FrameworkDescription = metadata.GetValueOrDefault("FrameworkDescription", string.Empty),
+            OperatingSystemDescription = metadata.GetValueOrDefault("OperatingSystemDescription", string.Empty),
+            WindowsVersion = metadata.GetValueOrDefault("WindowsVersion", string.Empty),
+            WindowsBuild = metadata.GetValueOrDefault("WindowsBuild", string.Empty),
+            ProcessArchitecture = metadata.GetValueOrDefault("ProcessArchitecture", string.Empty),
+            BuildArchitecture = metadata.GetValueOrDefault("BuildArchitecture", string.Empty),
+            LogicalProcessorCount = metadata.GetValueOrDefault("LogicalProcessorCount", string.Empty),
+            ProcessorName = metadata.GetValueOrDefault("ProcessorName", string.Empty),
+            ProcessorCoreCount = metadata.GetValueOrDefault("ProcessorCoreCount", string.Empty),
+            ProcessorLogicalCoreCount = metadata.GetValueOrDefault("ProcessorLogicalCoreCount", string.Empty),
+            ProcessorMaxClockMHz = metadata.GetValueOrDefault("ProcessorMaxClockMHz", string.Empty),
+            GpuName = metadata.GetValueOrDefault("GpuName", string.Empty),
+            MotherboardName = metadata.GetValueOrDefault("MotherboardName", string.Empty),
+            PowerSource = metadata.GetValueOrDefault("PowerSource", string.Empty),
+            WindowsPowerPlan = metadata.GetValueOrDefault("WindowsPowerPlan", string.Empty),
+            RamTotal = metadata.GetValueOrDefault("RamTotal", string.Empty),
+            RamModules = metadata.GetValueOrDefault("RamModules", string.Empty),
+            OpenClPlatformName = metadata.GetValueOrDefault("OpenClPlatformName", string.Empty),
+            OpenClPlatformVersion = metadata.GetValueOrDefault("OpenClPlatformVersion", string.Empty),
+            OpenClDeviceName = metadata.GetValueOrDefault("OpenClDeviceName", string.Empty),
+            OpenClDeviceVersion = metadata.GetValueOrDefault("OpenClDeviceVersion", string.Empty),
+            OpenClCVersion = metadata.GetValueOrDefault("OpenClCVersion", string.Empty),
+            OpenClInfoStatus = metadata.GetValueOrDefault("OpenClInfoStatus", string.Empty)
+        };
+
         return new BenchmarkSession
         {
             SessionId = Guid.Parse(metadata["SessionId"]),
@@ -136,6 +187,7 @@ public sealed class BenchmarkCsvService
             AadBase64 = metadata.GetValueOrDefault("AadBase64", string.Empty),
             Rows = rows,
             Summaries = BuildSummaries(rows),
+            EnvironmentInfo = environmentInfo,
             EnvironmentDescription = metadata.GetValueOrDefault("EnvironmentDescription", string.Empty),
             Notes = metadata.GetValueOrDefault("Notes", string.Empty)
         };
@@ -146,7 +198,7 @@ public sealed class BenchmarkCsvService
         builder.Append('#');
         builder.Append(key);
         builder.Append(',');
-        builder.AppendLine(Escape(value));
+        builder.AppendLine(Escape(value ?? string.Empty));
     }
 
     private static string Escape(string value)
@@ -262,9 +314,9 @@ public sealed class BenchmarkCsvService
             return null;
         }
 
-        var baselineAverage = baselineRows.Average(row => row.ElapsedMilliseconds);
         var candidateAverage = candidateRows.Average(row => row.ElapsedMilliseconds);
-        if (candidateAverage <= 0)
+        var baselineAverage = baselineRows.Average(row => row.ElapsedMilliseconds);
+        if (candidateAverage <= 0 || baselineAverage <= 0)
         {
             return null;
         }

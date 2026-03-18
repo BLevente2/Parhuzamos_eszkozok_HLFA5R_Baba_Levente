@@ -11,12 +11,14 @@ public sealed class BenchmarkService
     private readonly PasswordDerivationService _passwordDerivationService;
     private readonly ManagedCryptoService _managedCryptoService;
     private readonly NativeCryptoFacade _nativeCryptoFacade;
+    private readonly EnvironmentInspectionService _environmentInspectionService;
 
-    public BenchmarkService(PasswordDerivationService passwordDerivationService, ManagedCryptoService managedCryptoService, NativeCryptoFacade nativeCryptoFacade)
+    public BenchmarkService(PasswordDerivationService passwordDerivationService, ManagedCryptoService managedCryptoService, NativeCryptoFacade nativeCryptoFacade, EnvironmentInspectionService environmentInspectionService)
     {
         _passwordDerivationService = passwordDerivationService;
         _managedCryptoService = managedCryptoService;
         _nativeCryptoFacade = nativeCryptoFacade;
+        _environmentInspectionService = environmentInspectionService;
     }
 
 
@@ -45,7 +47,8 @@ public sealed class BenchmarkService
         var aad = _passwordDerivationService.CreateRandomBytes(16);
         var key = _passwordDerivationService.DeriveKey(request.Password, salt, request.KeySizeBits);
         var rows = new List<BenchmarkResultRow>();
-        var environmentDescription = BuildEnvironmentDescription();
+        var environmentInfo = _environmentInspectionService.CollectBenchmarkEnvironmentInfo();
+        var environmentDescription = _environmentInspectionService.BuildEnvironmentDescription(environmentInfo);
 
         progress?.Report("Preparing benchmark payload...");
 
@@ -119,6 +122,7 @@ public sealed class BenchmarkService
             AadBase64 = Convert.ToBase64String(aad),
             Rows = rows,
             Summaries = summaries,
+            EnvironmentInfo = environmentInfo,
             EnvironmentDescription = environmentDescription,
             Notes = BuildNotes(request)
         };
@@ -453,10 +457,6 @@ public sealed class BenchmarkService
         return ((inputBytes / 16) + 1) * 16;
     }
 
-    private static string BuildEnvironmentDescription()
-    {
-        return $"{RuntimeInformation.FrameworkDescription} | {RuntimeInformation.OSDescription} | {RuntimeInformation.ProcessArchitecture} | Logical processors: {Environment.ProcessorCount}";
-    }
 
     private static string BuildNotes(BenchmarkRequest request)
     {

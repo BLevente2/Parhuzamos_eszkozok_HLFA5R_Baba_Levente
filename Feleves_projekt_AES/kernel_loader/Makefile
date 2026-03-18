@@ -56,6 +56,10 @@ CFLAGS += -Wpedantic -Wconversion -Wshadow -Wstrict-prototypes
 endif
 LDFLAGS :=
 
+ifeq ($(OS),Windows_NT)
+LDFLAGS += -static-libgcc
+endif
+
 SRC := src/kernel_loader.c
 OBJ := $(OBJ_DIR)/kernel_loader.o
 

@@ -68,6 +68,10 @@ endif
 
 LDFLAGS :=
 
+ifeq ($(OS),Windows_NT)
+LDFLAGS += -static-libgcc
+endif
+
 ifeq ($(PROF),1)
 CFLAGS_BASE += -DCRYPTO_OCL_PROFILE
 endif

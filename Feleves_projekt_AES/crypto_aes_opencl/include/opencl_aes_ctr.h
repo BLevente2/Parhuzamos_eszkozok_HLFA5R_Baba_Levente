@@ -29,6 +29,11 @@ crypto_status_t crypto_ocl_aes_ctr_xor(const uint8_t* key,
                                       uint64_t* out_kernel_ns);
 
 const char* crypto_ocl_last_error_message(void);
+const char* crypto_ocl_platform_name(void);
+const char* crypto_ocl_platform_version(void);
+const char* crypto_ocl_device_name(void);
+const char* crypto_ocl_device_version(void);
+const char* crypto_ocl_device_opencl_c_version(void);
 void crypto_ocl_shutdown(void);
 
 #ifdef __cplusplus

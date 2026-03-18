@@ -50,11 +50,38 @@ public sealed class NativeCryptoFacade
             message = $"OpenCL warmup failed: {GetOpenClErrorMessage(status)}";
             return false;
         }
+        catch (BadImageFormatException ex)
+        {
+            message = $"OpenCL warmup failed: {BuildOpenClLoadFailureHint(ex.Message)}";
+            return false;
+        }
+        catch (DllNotFoundException ex)
+        {
+            message = $"OpenCL warmup failed: {BuildOpenClLoadFailureHint(ex.Message)}";
+            return false;
+        }
         catch (Exception ex)
         {
             message = $"OpenCL warmup failed: {ex.Message}";
             return false;
         }
+    }
+
+    private static string BuildOpenClLoadFailureHint(string rawMessage)
+    {
+        var architecture = Environment.Is64BitProcess ? "x64" : "x86";
+        var hint = $"{rawMessage} (Process architecture: {architecture}).";
+
+        if (!Environment.Is64BitProcess)
+        {
+            hint += " This typically means a 32-bit dependency of crypto_aes_opencl.dll could not be loaded. Ensure that a 32-bit OpenCL runtime is installed (GPU driver / ICD loader) and that all native DLL dependencies are present next to the executable. If you only have a 64-bit OpenCL runtime, use the x64 build.";
+        }
+        else
+        {
+            hint += " Ensure that the OpenCL runtime is installed and all native DLL dependencies are present next to the executable.";
+        }
+
+        return hint;
     }
 
     public string GetOpenClLastErrorMessage()
@@ -66,6 +93,38 @@ public sealed class NativeCryptoFacade
         catch
         {
             return "No OpenCL diagnostic message is currently available.";
+        }
+    }
+
+    public bool TryGetOpenClEnvironmentInfo(out string platformName, out string platformVersion, out string deviceName, out string deviceVersion, out string openClCVersion, out string statusMessage)
+    {
+        platformName = string.Empty;
+        platformVersion = string.Empty;
+        deviceName = string.Empty;
+        deviceVersion = string.Empty;
+        openClCVersion = string.Empty;
+
+        try
+        {
+            platformName = NativeOpenClMethods.GetPlatformName();
+            platformVersion = NativeOpenClMethods.GetPlatformVersion();
+            deviceName = NativeOpenClMethods.GetDeviceName();
+            deviceVersion = NativeOpenClMethods.GetDeviceVersion();
+            openClCVersion = NativeOpenClMethods.GetDeviceOpenClCVersion();
+
+            if (string.IsNullOrWhiteSpace(platformName) && string.IsNullOrWhiteSpace(deviceName) && string.IsNullOrWhiteSpace(deviceVersion))
+            {
+                statusMessage = GetOpenClLastErrorMessage();
+                return false;
+            }
+
+            statusMessage = "OpenCL platform and device information resolved successfully.";
+            return true;
+        }
+        catch (Exception ex)
+        {
+            statusMessage = $"Failed to query OpenCL platform and device information: {ex.Message}";
+            return false;
         }
     }
 

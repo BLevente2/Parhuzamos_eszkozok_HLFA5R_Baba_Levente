@@ -56,9 +56,9 @@ public sealed class Form1 : Form
 
     public Form1()
     {
-        _singleFileCryptoService = new SingleFileCryptoService(_passwordDerivationService, _nativeCryptoFacade);
-        _benchmarkService = new BenchmarkService(_passwordDerivationService, _managedCryptoService, _nativeCryptoFacade);
         _environmentInspectionService = new EnvironmentInspectionService(_nativeCryptoFacade);
+        _singleFileCryptoService = new SingleFileCryptoService(_passwordDerivationService, _nativeCryptoFacade);
+        _benchmarkService = new BenchmarkService(_passwordDerivationService, _managedCryptoService, _nativeCryptoFacade, _environmentInspectionService);
         InitializeComponent();
         Load += OnFormLoad;
     }

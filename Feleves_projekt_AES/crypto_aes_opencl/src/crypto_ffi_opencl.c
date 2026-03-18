@@ -82,6 +82,31 @@ const char* crypto_ffi_opencl_last_error_message(void)
     return crypto_ocl_last_error_message();
 }
 
+const char* crypto_ffi_opencl_platform_name(void)
+{
+    return crypto_ocl_platform_name();
+}
+
+const char* crypto_ffi_opencl_platform_version(void)
+{
+    return crypto_ocl_platform_version();
+}
+
+const char* crypto_ffi_opencl_device_name(void)
+{
+    return crypto_ocl_device_name();
+}
+
+const char* crypto_ffi_opencl_device_version(void)
+{
+    return crypto_ocl_device_version();
+}
+
+const char* crypto_ffi_opencl_device_opencl_c_version(void)
+{
+    return crypto_ocl_device_opencl_c_version();
+}
+
 crypto_status_t crypto_ffi_opencl_aes_ctr_encrypt_alloc(const uint8_t* key,
                                                        size_t key_len_bytes,
                                                        const uint8_t iv16[16],

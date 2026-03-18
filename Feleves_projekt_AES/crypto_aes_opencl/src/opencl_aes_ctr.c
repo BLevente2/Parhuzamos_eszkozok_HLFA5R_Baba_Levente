@@ -49,6 +49,11 @@ typedef struct crypto_ocl_ctx_t {
 } crypto_ocl_ctx_t;
 
 static crypto_ocl_ctx_t g_ctx;
+static char g_platform_name[256];
+static char g_platform_version[256];
+static char g_device_name[256];
+static char g_device_version[256];
+static char g_device_opencl_c_version[256];
 
 static crypto_status_t ocl_init_if_needed(void);
 static crypto_status_t ocl_ensure_io_buffers(size_t len);
@@ -134,6 +139,127 @@ static void format_cl_error(char* dst, size_t cap, const char* where, cl_int e)
     snprintf(dst, cap, "%s (OpenCL error %d)", where, (int)e);
 #endif
     dst[cap - 1] = 0;
+}
+
+static crypto_status_t ocl_choose_platform_device(cl_platform_id* out_platform, cl_device_id* out_device);
+
+static void query_platform_info_string(cl_platform_id platform, cl_platform_info param, char* dst, size_t cap)
+{
+    size_t need = 0;
+    cl_int e;
+
+    if (!dst || cap == 0) {
+        return;
+    }
+
+    dst[0] = '\0';
+    if (!platform) {
+        return;
+    }
+
+    e = clGetPlatformInfo(platform, param, 0, NULL, &need);
+    if (e != CL_SUCCESS || need == 0) {
+        return;
+    }
+
+    if (need > cap) {
+        need = cap;
+    }
+
+    e = clGetPlatformInfo(platform, param, need, dst, NULL);
+    if (e != CL_SUCCESS) {
+        dst[0] = '\0';
+        return;
+    }
+
+    dst[cap - 1] = '\0';
+}
+
+static void query_device_info_string(cl_device_id device, cl_device_info param, char* dst, size_t cap)
+{
+    size_t need = 0;
+    cl_int e;
+
+    if (!dst || cap == 0) {
+        return;
+    }
+
+    dst[0] = '\0';
+    if (!device) {
+        return;
+    }
+
+    e = clGetDeviceInfo(device, param, 0, NULL, &need);
+    if (e != CL_SUCCESS || need == 0) {
+        return;
+    }
+
+    if (need > cap) {
+        need = cap;
+    }
+
+    e = clGetDeviceInfo(device, param, need, dst, NULL);
+    if (e != CL_SUCCESS) {
+        dst[0] = '\0';
+        return;
+    }
+
+    dst[cap - 1] = '\0';
+}
+
+static void refresh_opencl_info_cache(void)
+{
+    cl_platform_id platform = NULL;
+    cl_device_id device = NULL;
+
+    g_platform_name[0] = '\0';
+    g_platform_version[0] = '\0';
+    g_device_name[0] = '\0';
+    g_device_version[0] = '\0';
+    g_device_opencl_c_version[0] = '\0';
+
+    if (g_ctx.platform && g_ctx.device) {
+        platform = g_ctx.platform;
+        device = g_ctx.device;
+    } else if (ocl_choose_platform_device(&platform, &device) != CRYPTO_OK) {
+        return;
+    }
+
+    query_platform_info_string(platform, CL_PLATFORM_NAME, g_platform_name, sizeof(g_platform_name));
+    query_platform_info_string(platform, CL_PLATFORM_VERSION, g_platform_version, sizeof(g_platform_version));
+    query_device_info_string(device, CL_DEVICE_NAME, g_device_name, sizeof(g_device_name));
+    query_device_info_string(device, CL_DEVICE_VERSION, g_device_version, sizeof(g_device_version));
+    query_device_info_string(device, CL_DEVICE_OPENCL_C_VERSION, g_device_opencl_c_version, sizeof(g_device_opencl_c_version));
+}
+
+const char* crypto_ocl_platform_name(void)
+{
+    refresh_opencl_info_cache();
+    return g_platform_name;
+}
+
+const char* crypto_ocl_platform_version(void)
+{
+    refresh_opencl_info_cache();
+    return g_platform_version;
+}
+
+const char* crypto_ocl_device_name(void)
+{
+    refresh_opencl_info_cache();
+    return g_device_name;
+}
+
+const char* crypto_ocl_device_version(void)
+{
+    refresh_opencl_info_cache();
+    return g_device_version;
+}
+
+const char* crypto_ocl_device_opencl_c_version(void)
+{
+    refresh_opencl_info_cache();
+    return g_device_opencl_c_version;
 }
 
 static crypto_status_t ocl_choose_platform_device(cl_platform_id* out_platform, cl_device_id* out_device)

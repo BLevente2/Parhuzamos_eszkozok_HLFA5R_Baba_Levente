@@ -24,6 +24,11 @@ extern "C" {
 CRYPTO_OPENCL_API crypto_status_t crypto_ffi_opencl_warmup(void);
 CRYPTO_OPENCL_API void crypto_ffi_opencl_shutdown(void);
 CRYPTO_OPENCL_API const char* crypto_ffi_opencl_last_error_message(void);
+CRYPTO_OPENCL_API const char* crypto_ffi_opencl_platform_name(void);
+CRYPTO_OPENCL_API const char* crypto_ffi_opencl_platform_version(void);
+CRYPTO_OPENCL_API const char* crypto_ffi_opencl_device_name(void);
+CRYPTO_OPENCL_API const char* crypto_ffi_opencl_device_version(void);
+CRYPTO_OPENCL_API const char* crypto_ffi_opencl_device_opencl_c_version(void);
 
 CRYPTO_OPENCL_API crypto_status_t crypto_ffi_opencl_aes_ctr_encrypt_alloc(const uint8_t* key,
                                                                           size_t key_len_bytes,
