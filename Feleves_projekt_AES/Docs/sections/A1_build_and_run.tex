@@ -1,0 +1,48 @@
+\chapter{Fordítás és futtatás}
+
+\section{A dokumentum fordítása (LuaLaTeX)}
+
+A \code{Docs} mappában lévő \code{Makefile} a következőket csinálja:
+
+\begin{enumerate}
+  \item lefuttatja a \code{scripts/generate\_stats.py} scriptet, ami a nyers CSV-kből előállítja a \code{generated/*.csv} fájlokat,
+  \item majd kétszer meghívja a \code{lualatex}-et, hogy a tartalomjegyzék és hivatkozások rendben legyenek.
+\end{enumerate}
+
+Használat:
+
+\begin{verbatim}
+cd Docs
+make
+\end{verbatim}
+
+A kimenet a \code{build/Docs.pdf} fájlba kerül.
+
+\section{Natív könyvtárak (C) fordítása}
+
+A natív és OpenCL-es komponensek MinGW alatt készültek. Példa:
+
+\begin{verbatim}
+cd aeslib
+mingw32-make clean
+mingw32-make all
+
+cd ../crypto_aes_opencl
+mingw32-make clean
+mingw32-make all
+\end{verbatim}
+
+\textbf{Megjegyzés:} Az x86 buildhez 32 bites toolchain és 32 bites OpenCL runtime szükséges.
+Ha a gépen csak 64 bites OpenCL ICD/runtime van, akkor a 32 bites processz nem fogja tudni betölteni
+a szükséges DLL-eket (ez a PC1-en megfigyelt jelenséggel összhangban van).
+
+\section{WinForms alkalmazás}
+
+A WinForms rész Visual Studio / \code{dotnet build} segítségével fordítható.
+A benchmarkok futtatásához érdemes:
+
+\begin{itemize}
+  \item release buildet használni,
+  \item stabil power profilt beállítani (laptopon különösen),
+  \item OpenCL esetén először warm-up-ot futtatni (a GUI-ben opció).
+\end{itemize}
