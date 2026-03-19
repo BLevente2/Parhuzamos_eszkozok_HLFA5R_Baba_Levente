@@ -1,6 +1,6 @@
 \chapter{Architektúra (x86/x64) és tápellátás hatása}
 
-Ebben a fejezetben kifejezetten azokat a kérdéseket vizsgálom, amelyeket a feladat kiemelt:
+Ebben a fejezetben kifejezetten azokat a kérdéseket vizsgálom, amelyeket különösen érdekesnek tartok:
 
 \begin{itemize}
   \item \textbf{x86 vs x64}: melyik gyorsabb, és miért?
@@ -24,7 +24,7 @@ A PC3 egy laptop, ezért különösen érdekes volt megnézni, mennyire fogja vi
 
 \subsection{x64 build: töltőn vs akkuról}
 
-\begin{table}[h!]
+\begin{table}[H]
   \centering
   \caption{PC3 x64 -- átlag throughput \mbps (GCM-256, 64 MB).}
   \fittable{\pgfplotstabletypeset[
@@ -40,7 +40,7 @@ A PC3 egy laptop, ezért különösen érdekes volt megnézni, mennyire fogja vi
   ]{\GenPath/pc3_power_gcm256_64mb_x64.csv}}
 \end{table}
 
-\begin{figure}[h!]
+\begin{figure}[H]
   \centering
   \begin{tikzpicture}
     \begin{axis}[
@@ -66,7 +66,7 @@ A PC3 egy laptop, ezért különösen érdekes volt megnézni, mennyire fogja vi
 
 \subsection{x86 build: töltőn vs akkuról}
 
-\begin{table}[h!]
+\begin{table}[H]
   \centering
   \caption{PC3 x86 -- átlag throughput \mbps (GCM-256, 64 MB).}
   \fittable{\pgfplotstabletypeset[
@@ -94,9 +94,9 @@ A PC3 mérésekből két hatás nagyon tisztán látszik:
 
 \section{x86 vs x64 összegzés a mérések alapján}
 
-\subsection{PC2: asztali konfiguráció (integrált GPU)}
+\subsection{PC2: laptopos konfiguráció (integrált GPU)}
 
-A PC2-n az x64 a natív és managed útvonalon látványosan gyorsabb,
+A PC2-n -- amely szintén laptop -- az x64 a natív és managed útvonalon látványosan gyorsabb,
 OpenCL-nél viszont csak pár százalék a különbség (a GPU végzi a munkát, a host oldali overhead kisebb arányban változik).
 
 \subsection{PC4: erős diszkrét GPU (RTX 4060)}
@@ -108,8 +108,8 @@ de ez főleg azért van, mert a baseline lassabb.
 
 \subsection{OpenCL és ``deprecated'' függvények hipotézis}
 
-A feladatban szereplő felvetés szerint az x64 gyorsabb lehet részben azért, mert az OpenCL kód
-kompatibilitásból régebbi függvényeket használ x86-on. A \emph{mért adatok} alapján:
+Saját felvetésem szerint az x64 gyorsabb lehet részben azért, mert az OpenCL kód
+kompatibilitási okból régebbi függvényeket is használ az x86-os környezet támogatásához. A \emph{mért adatok} alapján:
 
 \begin{itemize}
   \item ahol ugyanaz az OpenCL platform/driver fut (pl. PC4 NVIDIA CUDA OpenCL), ott az x86/x64 OpenCL throughput szinte azonos,

@@ -62,38 +62,36 @@ szorozza/összegzi $H$-val. Ebből jön ki egy 128 bites érték, amit a végén
 
 Az alábbi ábra a projektben is használt tipikus (12 bájtos) IV-es GCM folyamatot mutatja.
 
-\begin{figure}[h!]
+\begin{figure}[H]
   \centering
+  \resizebox{0.92\textwidth}{!}{%
   \begin{tikzpicture}[
-    node distance=10mm,
-    box/.style={draw, rectangle, rounded corners=2pt, align=center, minimum width=3.8cm, minimum height=0.9cm},
-    small/.style={draw, rectangle, rounded corners=2pt, align=center, minimum width=2.9cm, minimum height=0.8cm},
+    box/.style={draw, rectangle, rounded corners=2pt, align=center, minimum width=3.8cm, minimum height=0.95cm},
+    small/.style={draw, rectangle, rounded corners=2pt, align=center, minimum width=3.0cm, minimum height=0.82cm},
     arrow/.style={-Latex, thick}
   ]
-    \node[box] (pt) {Plaintext $P$};
-    \node[box, right=18mm of pt] (ctr) {AES-CTR\\(keystream + XOR)};
-    \node[box, right=18mm of ctr] (ct) {Ciphertext $C$};
+    \node[box] (pt) at (0,0) {Plaintext $P$};
+    \node[box] (ctr) at (5.0,0) {AES-CTR\\(keystream + XOR)};
+    \node[box] (ct) at (10.0,0) {Ciphertext $C$};
 
-    \node[small, below=14mm of ctr] (aad) {AAD};
-    \node[box, below=14mm of ct] (ghash) {GHASH\\GF($2^{128}$)};
-    \node[box, left=18mm of ghash] (tag) {Tag $T$};
+    \node[small] (aad) at (5.0,-2.2) {AAD};
+    \node[box] (ghash) at (10.0,-2.2) {GHASH\\GF($2^{128}$)};
 
-    \node[small, below=14mm of tag] (j0) {$J_0$ (IV-ből)};
-    \node[small, below=14mm of ghash] (h) {$H = AES_K(0^{128})$};
+    \node[small] (j0) at (5.0,-4.5) {$J_0$ (IV-ből)};
+    \node[small] (h) at (10.0,-4.5) {$H = AES_K(0^{128})$};
+    \node[small] (tag) at (7.5,-6.6) {Tag $T$};
 
     \draw[arrow] (pt) -- (ctr);
     \draw[arrow] (ctr) -- (ct);
-
-    \draw[arrow] (aad) -- (ghash);
     \draw[arrow] (ct) -- (ghash);
-
+    \draw[arrow] (aad.east) -- (ghash.west);
     \draw[arrow] (h) -- (ghash);
-    \draw[arrow] (j0) -- (tag);
-    \draw[arrow] (ghash) -- (tag);
+    \draw[arrow] (j0.east) -- (tag.west);
+    \draw[arrow] (ghash.south west) -- (tag.north east);
 
-    % annotate: tag calc
-    \node[below=2mm of tag, align=center] (tagformula) {\scriptsize $T = AES_K(J_0) \oplus GHASH_H(AAD, C)$};
-  \end{tikzpicture}
+    \node[align=center, font=\scriptsize] at (7.5,-7.7) {$T = AES_K(J_0) \oplus GHASH_H(AAD, C)$};
+  \end{tikzpicture}%
+  }
   \caption{AES-GCM magas szintű folyamat: CTR titkosítás + GHASH + tag előállítás.}
 \end{figure}
 
